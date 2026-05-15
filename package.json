@@ -1,0 +1,48 @@
+{
+  "name": "xiaoelong-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "dev:desktop": "concurrently \"npm run dev:server\" \"npm run dev:client\" \"wait-on tcp:5173 && cross-env ELECTRON_START_URL=http://localhost:5173 electron electron/main.js\"",
+    "build": "npm run build --workspace shared && npm run build --workspace server && npm run build --workspace client",
+    "db:init": "npm run db:init --workspace server",
+    "electron:pack": "npm run build && electron-builder --dir"
+  },
+  "main": "electron/main.js",
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.xiaoelong.desktop",
+    "productName": "XiaoELong",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "client/dist/**/*",
+      "server/dist/**/*",
+      "server/package.json",
+      "shared/dist/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "dir"
+      ]
+    }
+  }
+}
