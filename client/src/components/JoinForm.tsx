@@ -23,7 +23,7 @@ export function JoinForm(props: JoinFormProps): JSX.Element {
   return (
     <div className="join-card">
       <h1>XiaoELong</h1>
-      <p className="subtext">输入邀请码后加入群组桌面伴侣。</p>
+      <p className="subtext">输入邀请码后加入小鳄龙之家。</p>
 
       <form onSubmit={handleSubmit} className="join-form">
         <label>
@@ -52,16 +52,21 @@ export function JoinForm(props: JoinFormProps): JSX.Element {
         <label>
           头像（可选）
           <input
+            className="file-input"
             type="file"
             accept="image/*"
             onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)}
           />
+          <span className="file-upload-control">
+            <span className="file-upload-button">选择图片</span>
+            <span className="file-upload-name">{avatarFile ? avatarFile.name : "未选择图片"}</span>
+          </span>
         </label>
 
         {props.error ? <p className="error-text">{props.error}</p> : null}
 
         <button type="submit" disabled={props.loading}>
-          {props.loading ? "加入中..." : "加入群组"}
+          {props.loading ? "加入中..." : "加入小鳄龙"}
         </button>
       </form>
     </div>

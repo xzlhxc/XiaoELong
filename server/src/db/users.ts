@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { UserProfile } from "@xiaoelong/shared";
+import type { ResultSetHeader } from "mysql2";
 import { pool } from "./pool.js";
 import { mapUserRow, type UserRow } from "./mappers.js";
 
@@ -43,4 +44,9 @@ export async function listUsers(): Promise<UserProfile[]> {
   );
 
   return rows.map(mapUserRow);
+}
+
+export async function deleteUserById(userId: string): Promise<boolean> {
+  const [result] = await pool.execute<ResultSetHeader>("DELETE FROM users WHERE id = ?", [userId]);
+  return result.affectedRows > 0;
 }

@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  ChatMessage,
-  DailyQuestionTodayResponse,
-  GomokuGame,
-  GomokuUpdatePayload,
-  PresenceDeltaPayload,
-  PresenceUser,
-  UserProfile
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  MOOD_OPTIONS,
+  type ChatMessage,
+  type DailyMood,
+  type DailyMoodUpdatePayload,
+  type DailyMoodTodayResponse,
+  type DailyQuestionTodayResponse,
+  type GomokuGame,
+  type GomokuUpdatePayload,
+  type MoodEmoji,
+  type PresenceDeltaPayload,
+  type PresenceUser,
+  type UserProfile
 } from "@xiaoelong/shared";
 import {
   ApiError,
+  deleteCurrentUser,
   getGomokuGames,
   getMe,
   getRecentMessages,
   getTodayQuestion,
+  getTodayMood,
   joinWithInvite,
+  setTodayMood,
   submitTodayAnswer
 } from "./api";
 import { AvatarDock } from "./components/AvatarDock";
@@ -28,6 +36,27 @@ import { connectSocket, type AppSocket } from "./socket";
 const TOKEN_STORAGE_KEY = "xiaoelong_access_token";
 
 type ModuleTab = "chat" | "daily" | "gomoku";
+type DesktopRole = "auth" | "avatar" | "panel" | "single";
+type PanelView = "home" | "settings";
+
+interface DesktopSettingsState {
+  openAtLogin: boolean;
+  panelAlwaysOnTop: boolean;
+}
+
+function getDesktopRole(): DesktopRole {
+  if (!window.xiaoelongDesktop?.isDesktop) {
+    return "single";
+  }
+
+  const role = window.xiaoelongDesktop.role ?? new URLSearchParams(window.location.search).get("desktopRole");
+  return role === "auth" || role === "avatar" || role === "panel" ? role : "auth";
+}
+
+function getInitialPanelView(): PanelView {
+  const view = new URLSearchParams(window.location.search).get("desktopPanelView");
+  return view === "settings" ? "settings" : "home";
+}
 
 function updatePresenceStatus(current: PresenceUser[], onlineUserIds: string[]): PresenceUser[] {
   const onlineSet = new Set(onlineUserIds);
@@ -50,6 +79,10 @@ function applyPresenceDelta(current: PresenceUser[], payload: PresenceDeltaPaylo
     ...user,
     isOnline: onlineSet.has(user.id)
   }));
+}
+
+function applyMoodUpdate(current: PresenceUser[], userId: string, mood: DailyMood): PresenceUser[] {
+  return current.map((user) => (user.id === userId ? { ...user, todayMood: mood } : user));
 }
 
 function dedupeMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -113,36 +146,87 @@ export default function App(): JSX.Element {
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [dailyData, setDailyData] = useState<DailyQuestionTodayResponse | null>(null);
+  const [moodStatus, setMoodStatus] = useState<DailyMoodTodayResponse | null>(null);
+  const [moodPreviewOpen, setMoodPreviewOpen] = useState(false);
   const [gomokuGames, setGomokuGames] = useState<GomokuGame[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
 
   const [booting, setBooting] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  const [accountDeleting, setAccountDeleting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [dailyError, setDailyError] = useState<string | null>(null);
   const [dailyLoading, setDailyLoading] = useState(false);
+  const [moodLoading, setMoodLoading] = useState(false);
   const [gomokuError, setGomokuError] = useState<string | null>(null);
   const [gomokuLoading, setGomokuLoading] = useState(false);
   const [socketError, setSocketError] = useState<string | null>(null);
 
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ModuleTab>("chat");
+  const [panelView, setPanelView] = useState<PanelView>(() => getInitialPanelView());
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [desktopSettings, setDesktopSettings] = useState<DesktopSettingsState>({
+    openAtLogin: false,
+    panelAlwaysOnTop: true
+  });
+  const desktopRole = getDesktopRole();
 
-  const loadDailyQuestion = useCallback(async () => {
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    socketRef.current?.disconnect();
+    socketRef.current = null;
+    setToken(null);
+    setCurrentUser(null);
+    setPresenceUsers([]);
+    setMessages([]);
+    setDailyData(null);
+    setMoodStatus(null);
+    setMoodPreviewOpen(false);
+    setGomokuGames([]);
+    setSelectedGameId(null);
+    setPanelOpen(false);
+    setPanelView("home");
+    setDeleteConfirmOpen(false);
+    setAccountDeleting(false);
+    setSocketError(null);
+  }, []);
+
+  const loadDailyQuestion = useCallback(async (options?: { silent?: boolean }) => {
     if (!token) {
       return;
     }
 
-    setDailyLoading(true);
-    setDailyError(null);
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setDailyLoading(true);
+      setDailyError(null);
+    }
     try {
       const today = await getTodayQuestion(token);
       setDailyData(today);
     } catch (error) {
-      setDailyError(error instanceof Error ? error.message : "加载每日问题失败。");
+      if (!silent) {
+        setDailyError(error instanceof Error ? error.message : "加载每日一题失败。");
+      }
     } finally {
-      setDailyLoading(false);
+      if (!silent) {
+        setDailyLoading(false);
+      }
+    }
+  }, [token]);
+
+  const loadTodayMood = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+
+    try {
+      const todayMood = await getTodayMood(token);
+      setMoodStatus(todayMood);
+    } catch {
+      setMoodStatus(null);
     }
   }, [token]);
 
@@ -175,6 +259,8 @@ export default function App(): JSX.Element {
         setPresenceUsers([]);
         setMessages([]);
         setDailyData(null);
+        setMoodStatus(null);
+        setMoodPreviewOpen(false);
         setGomokuGames([]);
         setBooting(false);
         return;
@@ -202,6 +288,8 @@ export default function App(): JSX.Element {
           setPresenceUsers([]);
           setMessages([]);
           setDailyData(null);
+          setMoodStatus(null);
+          setMoodPreviewOpen(false);
           setGomokuGames([]);
         }
       } finally {
@@ -218,12 +306,16 @@ export default function App(): JSX.Element {
   }, [token]);
 
   useEffect(() => {
-    if (!token || !currentUser) {
+    if (!token || !currentUser || desktopRole === "auth") {
       return;
     }
 
-    void loadDailyQuestion();
-    void loadGomokuGames();
+    void loadTodayMood();
+
+    if (desktopRole !== "avatar") {
+      void loadDailyQuestion();
+      void loadGomokuGames();
+    }
 
     const socket = connectSocket(token);
     socketRef.current = socket;
@@ -264,6 +356,18 @@ export default function App(): JSX.Element {
       });
     });
 
+    socket.on("mood:update", (payload: DailyMoodUpdatePayload) => {
+      setPresenceUsers((prev) => applyMoodUpdate(prev, payload.userId, payload.mood));
+      if (payload.userId === currentUser.id) {
+        setMoodStatus((prev) => ({
+          moodDay: payload.mood.moodDay,
+          mood: payload.mood,
+          options: prev?.options ?? [...MOOD_OPTIONS],
+          shouldPrompt: false
+        }));
+      }
+    });
+
     socket.on("gomoku:update", (payload: GomokuUpdatePayload) => {
       setGomokuGames((prev) => upsertGame(prev, payload.game));
       if (!selectedGameId) {
@@ -280,7 +384,74 @@ export default function App(): JSX.Element {
       socketRef.current = null;
       setSocketError(null);
     };
-  }, [token, currentUser, loadDailyQuestion, loadGomokuGames, selectedGameId]);
+  }, [token, currentUser, desktopRole, loadTodayMood, loadDailyQuestion, loadGomokuGames, selectedGameId]);
+
+  useEffect(() => {
+    if (!token || !currentUser || desktopRole === "auth" || desktopRole === "avatar") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadDailyQuestion({ silent: true });
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [token, currentUser, desktopRole, loadDailyQuestion]);
+
+  useEffect(() => {
+    if (!window.xiaoelongDesktop?.isDesktop) {
+      return;
+    }
+
+    const cleanups: Array<() => void> = [];
+    const panelViewCleanup = window.xiaoelongDesktop.onPanelViewChange?.((view) => {
+      setPanelView(view);
+    });
+    const settingsCleanup = window.xiaoelongDesktop.onSettingsChange?.((settings) => {
+      setDesktopSettings(settings);
+    });
+    const loginCleanup = window.xiaoelongDesktop.onLogin?.((nextToken) => {
+      if (!nextToken) {
+        return;
+      }
+      localStorage.setItem(TOKEN_STORAGE_KEY, nextToken);
+      setToken(nextToken);
+      setBooting(true);
+    });
+    const logoutCleanup = window.xiaoelongDesktop.onLogout?.(() => {
+      clearSession();
+    });
+    const moodPreviewCleanup = window.xiaoelongDesktop.onMoodPreview?.(() => {
+      setMoodPreviewOpen((prev) => !prev);
+      void loadTodayMood();
+    });
+
+    if (panelViewCleanup) {
+      cleanups.push(panelViewCleanup);
+    }
+    if (settingsCleanup) {
+      cleanups.push(settingsCleanup);
+    }
+    if (loginCleanup) {
+      cleanups.push(loginCleanup);
+    }
+    if (logoutCleanup) {
+      cleanups.push(logoutCleanup);
+    }
+    if (moodPreviewCleanup) {
+      cleanups.push(moodPreviewCleanup);
+    }
+
+    void window.xiaoelongDesktop.getSettings?.().then((settings) => {
+      setDesktopSettings(settings);
+    });
+
+    return () => {
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [clearSession, loadTodayMood]);
 
   async function handleJoin(payload: {
     inviteCode: string;
@@ -300,6 +471,7 @@ export default function App(): JSX.Element {
     try {
       const response = await joinWithInvite(formData);
       localStorage.setItem(TOKEN_STORAGE_KEY, response.accessToken);
+      window.xiaoelongDesktop?.notifyLogin?.(response.accessToken);
       setToken(response.accessToken);
       setCurrentUser(response.user);
       setBooting(true);
@@ -367,12 +539,34 @@ export default function App(): JSX.Element {
           ? {
               ...prev,
               answeredIndex: result.answeredIndex,
-              stats: result.stats
+              stats: result.stats,
+              result: result.result
             }
           : prev
       );
     } catch (error) {
       setDailyError(error instanceof Error ? error.message : "提交答案失败。");
+    }
+  }
+
+  async function handleSelectMood(emoji: MoodEmoji): Promise<void> {
+    if (!token) {
+      return;
+    }
+
+    setMoodLoading(true);
+    try {
+      const result = await setTodayMood(token, { emoji });
+      setMoodStatus((prev) => ({
+        moodDay: result.moodDay,
+        mood: result.mood,
+        options: prev?.options ?? [...MOOD_OPTIONS],
+        shouldPrompt: false
+      }));
+      setPresenceUsers((prev) => applyMoodUpdate(prev, result.mood.userId, result.mood));
+      setMoodPreviewOpen(false);
+    } finally {
+      setMoodLoading(false);
     }
   }
 
@@ -426,93 +620,303 @@ export default function App(): JSX.Element {
     }
   }
 
-  const onlineCount = useMemo(
-    () => presenceUsers.filter((user) => user.isOnline).length,
-    [presenceUsers]
-  );
+  function handleAvatarToggle(): void {
+    const shouldCloseVisibleHome = panelView === "home" && panelOpen;
+    setPanelView("home");
+    if (window.xiaoelongDesktop?.toggleHomePanel) {
+      setPanelOpen(!shouldCloseVisibleHome);
+      window.xiaoelongDesktop.toggleHomePanel();
+      return;
+    }
+    setPanelOpen((prev) => !prev);
+  }
+
+  function handleAvatarSettings(): void {
+    const shouldCloseVisibleSettings = panelView === "settings" && panelOpen;
+    setPanelView("settings");
+    if (shouldCloseVisibleSettings) {
+      setPanelOpen(false);
+    }
+    if (window.xiaoelongDesktop?.openSettingsPanel) {
+      window.xiaoelongDesktop.openSettingsPanel();
+      return;
+    }
+    setPanelOpen(true);
+  }
+
+  function handleHideAllWindows(): void {
+    window.xiaoelongDesktop?.hideAllWindows?.();
+  }
+
+  async function handleToggleLoginAtStartup(): Promise<void> {
+    const nextSettings = await window.xiaoelongDesktop?.setLoginAtStartup?.(!desktopSettings.openAtLogin);
+    if (nextSettings) {
+      setDesktopSettings(nextSettings);
+    }
+  }
+
+  async function handleTogglePanelTopmost(): Promise<void> {
+    const nextSettings = await window.xiaoelongDesktop?.setPanelAlwaysOnTop?.(!desktopSettings.panelAlwaysOnTop);
+    if (nextSettings) {
+      setDesktopSettings(nextSettings);
+    }
+  }
+
+  function handlePreviewMoodPrompt(): void {
+    setMoodPreviewOpen(true);
+    void loadTodayMood();
+    window.xiaoelongDesktop?.previewMoodPrompt?.();
+  }
+
+  async function handleDeleteAccount(): Promise<void> {
+    if (!token) {
+      if (window.xiaoelongDesktop?.requestLogout) {
+        window.xiaoelongDesktop.requestLogout();
+      }
+      clearSession();
+      return;
+    }
+
+    setAccountDeleting(true);
+    try {
+      await deleteCurrentUser(token);
+      if (window.xiaoelongDesktop?.requestLogout) {
+        window.xiaoelongDesktop.requestLogout();
+      }
+      clearSession();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "注销失败，请重试。");
+    } finally {
+      setAccountDeleting(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!window.xiaoelongDesktop?.setWindowMode || desktopRole === "panel" || desktopRole === "avatar") {
+      return;
+    }
+    if (booting || !currentUser) {
+      window.xiaoelongDesktop.setWindowMode("auth");
+      return;
+    }
+    if (desktopRole === "auth") {
+      window.xiaoelongDesktop.setWindowMode("collapsed");
+      return;
+    }
+    window.xiaoelongDesktop.setWindowMode(panelOpen ? "expanded" : "collapsed");
+  }, [booting, currentUser, panelOpen, desktopRole]);
+
+  useLayoutEffect(() => {
+    if (desktopRole !== "panel" || booting || !currentUser) {
+      return;
+    }
+
+    window.xiaoelongDesktop?.notifyPanelReady?.();
+  }, [desktopRole, booting, currentUser, panelView, activeTab]);
+
+  const moodOptions = moodStatus?.options ?? [...MOOD_OPTIONS];
+  const moodPrompt =
+    desktopRole === "avatar" && (moodStatus?.shouldPrompt || moodPreviewOpen)
+      ? {
+          options: moodOptions,
+          selectedMood: moodStatus?.mood?.emoji ?? null,
+          loading: moodLoading,
+          onSelect: handleSelectMood
+        }
+      : undefined;
+  const moodPromptVisible = Boolean(moodPrompt);
+
+  useLayoutEffect(() => {
+    if (desktopRole !== "avatar") {
+      return;
+    }
+
+    window.xiaoelongDesktop?.setMoodPromptVisible?.(moodPromptVisible);
+    return () => {
+      window.xiaoelongDesktop?.setMoodPromptVisible?.(false);
+    };
+  }, [desktopRole, moodPromptVisible]);
+
+  const homePanel = currentUser ? (
+    <div className="panel">
+      <header className="topbar">
+        <h1>小鳄龙之家</h1>
+      </header>
+
+      {socketError ? <p className="error-text">{socketError}</p> : null}
+
+      <StatusBar
+        currentUserId={currentUser.id}
+        users={presenceUsers}
+        moodOptions={moodOptions}
+        moodLoading={moodLoading}
+        onSelectMood={handleSelectMood}
+      />
+
+      <nav className="module-tabs">
+        <button type="button" className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")}>
+          聊天
+        </button>
+        <button type="button" className={activeTab === "daily" ? "active" : ""} onClick={() => setActiveTab("daily")}>
+          每日一题
+        </button>
+        <button type="button" className={activeTab === "gomoku" ? "active" : ""} onClick={() => setActiveTab("gomoku")}>
+          五子棋
+        </button>
+      </nav>
+
+      {activeTab === "chat" ? (
+        <ChatPanel
+          currentUserId={currentUser.id}
+          messages={messages}
+          sendError={sendError}
+          onSendMessage={handleSendMessage}
+        />
+      ) : null}
+
+      {activeTab === "daily" ? (
+        <DailyQuestionPanel
+          data={dailyData}
+          loading={dailyLoading}
+          error={dailyError}
+          onRefresh={loadDailyQuestion}
+          onAnswer={handleAnswerDaily}
+        />
+      ) : null}
+
+      {activeTab === "gomoku" ? (
+        <GomokuPanel
+          currentUser={currentUser}
+          users={presenceUsers}
+          games={gomokuGames}
+          selectedGameId={selectedGameId}
+          loading={gomokuLoading}
+          error={gomokuError}
+          onRefresh={loadGomokuGames}
+          onSelectGame={setSelectedGameId}
+          onInvite={handleInviteGomoku}
+          onAccept={handleAcceptGomoku}
+          onMove={handleMoveGomoku}
+        />
+      ) : null}
+    </div>
+  ) : null;
+
+  const settingsPanel = currentUser ? (
+    <div className={`panel settings-panel ${deleteConfirmOpen ? "confirming" : ""}`}>
+      <div className="settings-content">
+      <header className="topbar settings-topbar">
+        <div className="panel-action-buttons" aria-label="设置操作">
+          <button type="button" className="ghost-button" onClick={handleHideAllWindows}>
+            隐藏小鳄龙
+          </button>
+          <button
+            type="button"
+            className={desktopSettings.openAtLogin ? "primary-soft-button" : "ghost-button"}
+            onClick={() => void handleToggleLoginAtStartup()}
+          >
+            {desktopSettings.openAtLogin ? "已开机自启" : "开机自启"}
+          </button>
+          <button
+            type="button"
+            className={desktopSettings.panelAlwaysOnTop ? "primary-soft-button" : "ghost-button"}
+            onClick={() => void handleTogglePanelTopmost()}
+          >
+            {desktopSettings.panelAlwaysOnTop ? "已置顶" : "置顶"}
+          </button>
+          <button type="button" className="ghost-button" onClick={handlePreviewMoodPrompt}>
+            预览心情
+          </button>
+          <button
+            type="button"
+            className="danger-button"
+            disabled={accountDeleting}
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            {accountDeleting ? "注销中" : "注销"}
+          </button>
+        </div>
+      </header>
+      </div>
+
+      {deleteConfirmOpen ? (
+        <div className="settings-confirm-layer" role="dialog" aria-modal="true" aria-label="确认注销">
+          <div className="settings-confirm-card">
+            <p>注销将删除该user所有记录</p>
+            <div className="settings-confirm-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={accountDeleting}
+                onClick={() => setDeleteConfirmOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={accountDeleting}
+                onClick={() => void handleDeleteAccount()}
+              >
+                {accountDeleting ? "注销中" : "确定"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+    </div>
+  ) : null;
+
+  const panelContent = panelView === "settings" ? settingsPanel : homePanel;
 
   if (booting) {
+    if (desktopRole === "avatar" || desktopRole === "panel") {
+      return <main className="page shell-page empty-page" />;
+    }
+
     return (
-      <main className="page loading-page">
+      <main className="page auth-page loading-page">
         <p>加载中...</p>
       </main>
     );
   }
 
   if (!currentUser) {
+    if (desktopRole === "avatar" || desktopRole === "panel") {
+      return <main className="page shell-page empty-page" />;
+    }
+
     return (
-      <main className="page">
+      <main className="page auth-page">
         <JoinForm loading={authLoading} error={authError} onSubmit={handleJoin} />
+      </main>
+    );
+  }
+
+  if (desktopRole === "panel") {
+    return <main className="page shell-page panel-page">{panelContent}</main>;
+  }
+
+  if (desktopRole === "avatar") {
+    return (
+      <main className="page shell-page avatar-page">
+        <AvatarDock
+          open={panelOpen}
+          nickname={currentUser.nickname}
+          moodPrompt={moodPrompt}
+          onToggle={handleAvatarToggle}
+          onSettings={handleAvatarSettings}
+        />
       </main>
     );
   }
 
   return (
     <main className="page shell-page">
-      <AvatarDock open={panelOpen} nickname={currentUser.nickname} onToggle={() => setPanelOpen((prev) => !prev)} />
+      <AvatarDock open={panelOpen} nickname={currentUser.nickname} onToggle={handleAvatarToggle} onSettings={handleAvatarSettings} />
 
-      {panelOpen ? (
-        <div className="panel">
-          <header className="topbar">
-            <div>
-              <h1>小鳄龙群组伴侣</h1>
-              <p>你好，{currentUser.nickname}</p>
-            </div>
-            <div className="badge">{onlineCount} 人在线</div>
-          </header>
-
-          {socketError ? <p className="error-text">{socketError}</p> : null}
-
-          <StatusBar currentUserId={currentUser.id} users={presenceUsers} />
-
-          <nav className="module-tabs">
-            <button type="button" className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")}>
-              聊天
-            </button>
-            <button type="button" className={activeTab === "daily" ? "active" : ""} onClick={() => setActiveTab("daily")}>
-              每日问题
-            </button>
-            <button type="button" className={activeTab === "gomoku" ? "active" : ""} onClick={() => setActiveTab("gomoku")}>
-              五子棋
-            </button>
-          </nav>
-
-          {activeTab === "chat" ? (
-            <ChatPanel
-              currentUserId={currentUser.id}
-              messages={messages}
-              sendError={sendError}
-              onSendMessage={handleSendMessage}
-            />
-          ) : null}
-
-          {activeTab === "daily" ? (
-            <DailyQuestionPanel
-              data={dailyData}
-              loading={dailyLoading}
-              error={dailyError}
-              onRefresh={loadDailyQuestion}
-              onAnswer={handleAnswerDaily}
-            />
-          ) : null}
-
-          {activeTab === "gomoku" ? (
-            <GomokuPanel
-              currentUser={currentUser}
-              users={presenceUsers}
-              games={gomokuGames}
-              selectedGameId={selectedGameId}
-              loading={gomokuLoading}
-              error={gomokuError}
-              onRefresh={loadGomokuGames}
-              onSelectGame={setSelectedGameId}
-              onInvite={handleInviteGomoku}
-              onAccept={handleAcceptGomoku}
-              onMove={handleMoveGomoku}
-            />
-          ) : null}
-        </div>
-      ) : null}
+      {panelOpen ? panelContent : null}
     </main>
   );
 }

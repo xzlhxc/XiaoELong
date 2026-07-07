@@ -57,7 +57,8 @@ export function createDailyQuestionRouter(
       res.json({
         ok: true,
         stats: result.stats,
-        answeredIndex: result.answeredIndex
+        answeredIndex: result.answeredIndex,
+        result: result.result
       });
     } catch (error) {
       if (error instanceof DailyQuestionValidationError) {

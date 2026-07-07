@@ -22,12 +22,45 @@ CREATE TABLE IF NOT EXISTS daily_questions (
   date DATE NOT NULL UNIQUE,
   question TEXT NOT NULL,
   options JSON NOT NULL,
+  category VARCHAR(32) NOT NULL DEFAULT '综合',
+  correct_answer_index INT NOT NULL DEFAULT 0,
+  explanation TEXT NULL,
   source_type ENUM('online', 'fallback', 'manual') NOT NULL DEFAULT 'online',
   source_context TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_daily_questions_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @add_daily_questions_category = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'category') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN category VARCHAR(32) NOT NULL DEFAULT ''综合'' AFTER options',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_category;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_daily_questions_correct_answer = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'correct_answer_index') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN correct_answer_index INT NOT NULL DEFAULT 0 AFTER category',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_correct_answer;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_daily_questions_explanation = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'explanation') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN explanation TEXT NULL AFTER correct_answer_index',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_explanation;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS daily_answers (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -41,6 +74,19 @@ CREATE TABLE IF NOT EXISTS daily_answers (
     FOREIGN KEY (question_id) REFERENCES daily_questions(id)
     ON DELETE CASCADE,
   CONSTRAINT fk_daily_answers_user
+    FOREIGN KEY (user_id) REFERENCES users(id)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS daily_moods (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id VARCHAR(36) NOT NULL,
+  mood_day DATE NOT NULL,
+  emoji VARCHAR(8) NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_daily_moods_user_day (user_id, mood_day),
+  KEY idx_daily_moods_mood_day (mood_day),
+  CONSTRAINT fk_daily_moods_user
     FOREIGN KEY (user_id) REFERENCES users(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

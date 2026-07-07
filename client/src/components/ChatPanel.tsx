@@ -1,6 +1,6 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "@xiaoelong/shared";
-import { withServerUrl } from "../env";
+import { UserAvatar } from "./UserAvatar";
 
 interface ChatPanelProps {
   currentUserId: string;
@@ -20,8 +20,64 @@ function formatTime(dateString: string): string {
 export function ChatPanel(props: ChatPanelProps): JSX.Element {
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [newMessageCount, setNewMessageCount] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const isAtBottomRef = useRef(true);
+  const lastMessageIdRef = useRef<number | null>(null);
 
   const renderedMessages = useMemo(() => props.messages, [props.messages]);
+
+  function scrollToBottom(behavior: ScrollBehavior = "auto"): void {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+    list.scrollTo({
+      top: list.scrollHeight,
+      behavior
+    });
+    isAtBottomRef.current = true;
+    setNewMessageCount(0);
+  }
+
+  function updateBottomState(): void {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+    const distanceToBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    const isAtBottom = distanceToBottom <= 28;
+    isAtBottomRef.current = isAtBottom;
+    if (isAtBottom) {
+      setNewMessageCount(0);
+    }
+  }
+
+  useLayoutEffect(() => {
+    const latestMessage = renderedMessages[renderedMessages.length - 1] ?? null;
+    const previousLastId = lastMessageIdRef.current;
+    if (!latestMessage) {
+      lastMessageIdRef.current = null;
+      setNewMessageCount(0);
+      return;
+    }
+
+    const isInitialLoad = previousLastId === null;
+    const hasNewMessage = latestMessage.id !== previousLastId;
+    lastMessageIdRef.current = latestMessage.id;
+
+    if (!hasNewMessage) {
+      return;
+    }
+
+    const latestIsMine = latestMessage.user.id === props.currentUserId;
+    if (isInitialLoad || isAtBottomRef.current || latestIsMine) {
+      scrollToBottom(isInitialLoad ? "auto" : "smooth");
+      return;
+    }
+
+    setNewMessageCount((count) => count + 1);
+  }, [renderedMessages, props.currentUserId]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -42,17 +98,15 @@ export function ChatPanel(props: ChatPanelProps): JSX.Element {
 
   return (
     <section className="chat-panel">
-      <h2>群聊</h2>
-      <div className="chat-list">
+      <div className="module-head">
+        <h2>群聊</h2>
+      </div>
+      <div className="chat-list" ref={listRef} onScroll={updateBottomState}>
         {renderedMessages.map((message) => {
           const isMine = message.user.id === props.currentUserId;
           return (
             <article className={`chat-item ${isMine ? "mine" : ""}`} key={message.id}>
-              {message.user.avatarUrl ? (
-                <img src={withServerUrl(message.user.avatarUrl) || ""} alt={message.user.nickname} className="avatar" />
-              ) : (
-                <div className="avatar avatar-fallback">{message.user.nickname.slice(0, 1)}</div>
-              )}
+              <UserAvatar user={message.user} />
               <div className="bubble">
                 <header>
                   <strong>{message.user.nickname}</strong>
@@ -65,16 +119,22 @@ export function ChatPanel(props: ChatPanelProps): JSX.Element {
         })}
       </div>
 
+      {newMessageCount > 0 ? (
+        <button type="button" className="chat-new-message-pill" onClick={() => scrollToBottom("smooth")}>
+          有新消息 {newMessageCount} 条
+        </button>
+      ) : null}
+
       <form onSubmit={handleSubmit} className="chat-form">
         <input
           type="text"
-          placeholder="输入消息..."
+          placeholder="写点什么..."
           value={content}
           onChange={(event) => setContent(event.target.value)}
           maxLength={1000}
         />
         <button type="submit" disabled={sending}>
-          {sending ? "发送中..." : "发送"}
+          {sending ? "发送中" : "发送"}
         </button>
       </form>
       {props.sendError ? <p className="error-text">{props.sendError}</p> : null}

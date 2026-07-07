@@ -5,8 +5,20 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export const MOOD_OPTIONS = ["😊", "🥰", "😌", "😎", "🥳", "🤔", "😐", "😮‍💨", "😴", "😟", "😞", "😭", "😡", "😤", "😱", "🤒"] as const;
+
+export type MoodEmoji = (typeof MOOD_OPTIONS)[number];
+
+export interface DailyMood {
+  userId: string;
+  moodDay: string;
+  emoji: MoodEmoji;
+  updatedAt: string;
+}
+
 export interface PresenceUser extends UserProfile {
   isOnline: boolean;
+  todayMood: DailyMood | null;
 }
 
 export interface ChatMessage {
@@ -25,6 +37,11 @@ export interface AuthMeResponse {
   user: UserProfile;
 }
 
+export interface AuthDeleteResponse {
+  ok: true;
+  deletedUserId: string;
+}
+
 export interface ChatHistoryResponse {
   messages: ChatMessage[];
 }
@@ -32,6 +49,7 @@ export interface ChatHistoryResponse {
 export interface DailyQuestion {
   id: number;
   date: string;
+  category: string;
   question: string;
   options: string[];
   sourceType: "online" | "fallback" | "manual";
@@ -39,22 +57,53 @@ export interface DailyQuestion {
   createdAt: string;
 }
 
+export interface DailyQuestionVoter extends UserProfile {
+  answeredAt: string;
+}
+
 export interface DailyQuestionStats {
   questionId: number;
   counts: number[];
   totalAnswers: number;
+  voters: DailyQuestionVoter[][];
+}
+
+export interface DailyQuestionResult {
+  answeredIndex: number;
+  correctAnswerIndex: number;
+  isCorrect: boolean;
+  explanation: string;
 }
 
 export interface DailyQuestionTodayResponse {
   question: DailyQuestion;
   stats: DailyQuestionStats;
   answeredIndex: number | null;
+  result: DailyQuestionResult | null;
 }
 
 export interface DailyQuestionAnswerResponse {
   ok: true;
   stats: DailyQuestionStats;
   answeredIndex: number;
+  result: DailyQuestionResult | null;
+}
+
+export interface DailyMoodTodayResponse {
+  moodDay: string;
+  mood: DailyMood | null;
+  options: MoodEmoji[];
+  shouldPrompt: boolean;
+}
+
+export interface DailyMoodSetPayload {
+  emoji: MoodEmoji;
+}
+
+export interface DailyMoodSetResponse {
+  ok: true;
+  moodDay: string;
+  mood: DailyMood;
 }
 
 export interface GomokuGame {
@@ -89,7 +138,7 @@ export interface PresenceInitPayload {
 export interface PresenceDeltaPayload {
   userId: string;
   onlineUserIds: string[];
-  user?: UserProfile;
+  user?: PresenceUser;
 }
 
 export interface ChatSendPayload {
@@ -104,6 +153,11 @@ export interface ChatSendAck {
 export interface DailyQuestionUpdatePayload {
   questionId: number;
   stats: DailyQuestionStats;
+}
+
+export interface DailyMoodUpdatePayload {
+  userId: string;
+  mood: DailyMood;
 }
 
 export interface GomokuInvitePayload {
@@ -144,6 +198,7 @@ export interface ServerToClientEvents {
   "presence:offline": (payload: PresenceDeltaPayload) => void;
   "chat:message": (message: ChatMessage) => void;
   "question:update": (payload: DailyQuestionUpdatePayload) => void;
+  "mood:update": (payload: DailyMoodUpdatePayload) => void;
   "gomoku:update": (payload: GomokuUpdatePayload) => void;
   "gomoku:end": (payload: GomokuEndPayload) => void;
 }

@@ -1,17 +1,21 @@
 import type {
   AuthJoinResponse,
+  AuthDeleteResponse,
   AuthMeResponse,
   ChatHistoryResponse,
   DailyQuestionAnswerResponse,
   DailyQuestionStats,
   DailyQuestionTodayResponse,
+  DailyMoodSetPayload,
+  DailyMoodSetResponse,
+  DailyMoodTodayResponse,
   GomokuGamesResponse,
   GomokuInviteResponse,
   GomokuMoveResponse
 } from "@xiaoelong/shared";
 import { serverUrl } from "./env";
 
-type HttpMethod = "GET" | "POST";
+type HttpMethod = "GET" | "POST" | "DELETE";
 
 interface RequestOptions {
   method?: HttpMethod;
@@ -64,6 +68,13 @@ export async function getMe(token: string): Promise<AuthMeResponse> {
   });
 }
 
+export async function deleteCurrentUser(token: string): Promise<AuthDeleteResponse> {
+  return requestJson<AuthDeleteResponse>("/api/auth/me", {
+    method: "DELETE",
+    token
+  });
+}
+
 export async function getRecentMessages(token: string, limit = 50): Promise<ChatHistoryResponse> {
   return requestJson<ChatHistoryResponse>(`/api/chat/messages?limit=${limit}`, {
     token
@@ -88,6 +99,18 @@ export async function submitTodayAnswer(
 export async function getQuestionStats(token: string, questionId: number): Promise<{ stats: DailyQuestionStats }> {
   return requestJson<{ stats: DailyQuestionStats }>(`/api/daily-question/stats?questionId=${questionId}`, {
     token
+  });
+}
+
+export async function getTodayMood(token: string): Promise<DailyMoodTodayResponse> {
+  return requestJson<DailyMoodTodayResponse>("/api/daily-mood/today", { token });
+}
+
+export async function setTodayMood(token: string, payload: DailyMoodSetPayload): Promise<DailyMoodSetResponse> {
+  return requestJson<DailyMoodSetResponse>("/api/daily-mood", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload)
   });
 }
 

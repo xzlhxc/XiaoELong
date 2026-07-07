@@ -1,5 +1,3 @@
-import { mkdirSync } from "node:fs";
-import path from "node:path";
 import http from "node:http";
 import cors from "cors";
 import express from "express";
@@ -7,25 +5,28 @@ import multer from "multer";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@xiaoelong/shared";
 import { env } from "./config/env.js";
-import authRouter from "./routes/auth.js";
+import { createAuthRouter } from "./routes/auth.js";
 import chatRouter from "./routes/chat.js";
+import { createDailyMoodRouter } from "./routes/daily-mood.js";
 import { createDailyQuestionRouter } from "./routes/daily-question.js";
 import { createGomokuRouter } from "./routes/gomoku.js";
 import { startQuestionScheduler } from "./jobs/question-scheduler.js";
 import { DailyQuestionService } from "./services/daily-question-service.js";
 import { GomokuService } from "./services/gomoku-service.js";
 import { setupSocket } from "./socket/index.js";
+import { ensureUploadDirs, uploadRoot } from "./utils/uploads.js";
 
 const app = express();
 const server = http.createServer(app);
+const corsOrigins = env.CLIENT_ORIGIN.split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-const uploadRoot = path.resolve(process.cwd(), "uploads");
-const avatarRoot = path.join(uploadRoot, "avatars");
-mkdirSync(avatarRoot, { recursive: true });
+ensureUploadDirs();
 
 app.use(
   cors({
-    origin: env.CLIENT_ORIGIN,
+    origin: corsOrigins,
     credentials: true
   })
 );
@@ -36,12 +37,11 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.use("/api/auth", authRouter);
 app.use("/api/chat", chatRouter);
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
   cors: {
-    origin: env.CLIENT_ORIGIN,
+    origin: corsOrigins,
     credentials: true
   }
 });
@@ -49,7 +49,9 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(server, {
 const dailyQuestionService = new DailyQuestionService();
 const gomokuService = new GomokuService();
 
+app.use("/api/auth", createAuthRouter(io));
 app.use("/api/daily-question", createDailyQuestionRouter(io, dailyQuestionService));
+app.use("/api/daily-mood", createDailyMoodRouter(io));
 app.use("/api/gomoku", createGomokuRouter(io, gomokuService));
 
 setupSocket(io, { gomokuService });

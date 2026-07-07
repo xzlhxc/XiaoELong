@@ -3,9 +3,11 @@ import type {
   GomokuAcceptPayload,
   GomokuInvitePayload,
   GomokuMovePayload,
+  PresenceUser,
   ServerToClientEvents
 } from "@xiaoelong/shared";
 import type { Server, Socket } from "socket.io";
+import { listDailyMoodsByUserId } from "../db/daily-moods.js";
 import { createMessage } from "../db/messages.js";
 import { listUsers, getUserById } from "../db/users.js";
 import { GomokuService, GomokuValidationError } from "../services/gomoku-service.js";
@@ -58,6 +60,17 @@ function removeOnlineSocket(userId: string, socketId: string): boolean {
   return true;
 }
 
+export async function listPresenceUsers(): Promise<PresenceUser[]> {
+  const allUsers = await listUsers();
+  const onlineSet = new Set(getOnlineUserIds());
+  const moodsByUserId = await listDailyMoodsByUserId();
+  return allUsers.map((user) => ({
+    ...user,
+    isOnline: onlineSet.has(user.id),
+    todayMood: moodsByUserId.get(user.id) ?? null
+  }));
+}
+
 function emitGomokuUpdate(
   io: Server<ClientToServerEvents, ServerToClientEvents>,
   game: import("@xiaoelong/shared").GomokuGame
@@ -105,20 +118,16 @@ export function setupSocket(
     const isFirstConnection = addOnlineSocket(userId, socket.id);
 
     try {
-      const allUsers = await listUsers();
-      const onlineSet = new Set(getOnlineUserIds());
-      const currentUser = allUsers.find((user) => user.id === userId);
+      const presenceUsers = await listPresenceUsers();
+      const currentUser = presenceUsers.find((user) => user.id === userId);
       socket.emit("presence:init", {
-        users: allUsers.map((user) => ({
-          ...user,
-          isOnline: onlineSet.has(user.id)
-        }))
+        users: presenceUsers
       });
 
       if (isFirstConnection) {
         io.to(MAIN_ROOM).emit("presence:online", {
           userId,
-          onlineUserIds: Array.from(onlineSet),
+          onlineUserIds: getOnlineUserIds(),
           user: currentUser
         });
       }

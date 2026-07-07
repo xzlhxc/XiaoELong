@@ -17,16 +17,12 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().min(1).default("30d"),
   MAX_MESSAGE_LENGTH: z.coerce.number().int().positive().default(1000),
   MAX_AVATAR_SIZE_MB: z.coerce.number().positive().default(3),
-  OPENAI_API_KEY: z.string().trim().optional(),
-  OPENAI_MODEL: z.string().trim().min(1).default("gpt-4o-mini"),
-  QUESTION_CRON: z.string().trim().min(1).default("0 0 * * *"),
-  QUESTION_TIMEZONE: z.string().trim().min(1).default("Asia/Shanghai"),
-  QUESTION_RSS_FEEDS: z
-    .string()
-    .trim()
-    .min(1)
-    .default("https://rss.nytimes.com/services/xml/rss/nyt/World.xml,https://feeds.bbci.co.uk/news/world/rss.xml"),
-  QUESTION_HEADLINE_LIMIT: z.coerce.number().int().positive().max(20).default(8)
+  UPLOAD_ROOT: z.string().trim().optional(),
+  DEEPSEEK_API_KEY: z.string().trim().optional(),
+  DEEPSEEK_BASE_URL: z.string().trim().url().default("https://api.deepseek.com"),
+  DEEPSEEK_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),
+  QUESTION_CRON: z.string().trim().min(1).default("0 8 * * *"),
+  QUESTION_TIMEZONE: z.string().trim().min(1).default("Asia/Shanghai")
 });
 
 export const env = envSchema.parse(process.env);

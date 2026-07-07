@@ -1,35 +1,104 @@
-import type { PresenceUser } from "@xiaoelong/shared";
-import { withServerUrl } from "../env";
+import { KeyboardEvent, MouseEvent, useEffect, useRef, useState } from "react";
+import type { MoodEmoji, PresenceUser } from "@xiaoelong/shared";
+import { UserAvatar } from "./UserAvatar";
 
 interface StatusBarProps {
   currentUserId: string;
   users: PresenceUser[];
+  moodOptions: MoodEmoji[];
+  moodLoading: boolean;
+  onSelectMood: (emoji: MoodEmoji) => void | Promise<void>;
 }
 
 export function StatusBar(props: StatusBarProps): JSX.Element {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const rootRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!pickerOpen) {
+      return;
+    }
+
+    function handleDocumentPointerDown(event: globalThis.PointerEvent): void {
+      if (rootRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setPickerOpen(false);
+    }
+
+    function handleDocumentKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setPickerOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handleDocumentPointerDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handleDocumentPointerDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [pickerOpen]);
+
+  function handleStatusKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    setPickerOpen((prev) => !prev);
+  }
+
+  function handleMoodClick(event: MouseEvent<HTMLButtonElement>, emoji: MoodEmoji): void {
+    event.stopPropagation();
+    void props.onSelectMood(emoji);
+    setPickerOpen(false);
+  }
+
   return (
-    <section className="status-bar">
-      <div className="status-header">
-        <h2>成员在线状态</h2>
-        <span>{props.users.filter((user) => user.isOnline).length} 在线</span>
-      </div>
+    <section className="status-bar" aria-label="成员状态" ref={rootRef}>
       <div className="status-list">
-        {props.users.map((user) => (
-          <div className="status-item" key={user.id}>
-            <div className="avatar-wrap">
-              {user.avatarUrl ? (
-                <img src={withServerUrl(user.avatarUrl) || ""} alt={user.nickname} className="avatar" />
-              ) : (
-                <div className="avatar avatar-fallback">{user.nickname.slice(0, 1)}</div>
-              )}
-              <span className={`presence-dot ${user.isOnline ? "online" : "offline"}`} />
+        {props.users.map((user) => {
+          const isCurrentUser = user.id === props.currentUserId;
+          return (
+            <div
+              className={`status-item ${user.isOnline ? "online" : "offline"} ${isCurrentUser ? "editable" : ""}`}
+              key={user.id}
+              onClick={isCurrentUser ? () => setPickerOpen((prev) => !prev) : undefined}
+              onKeyDown={isCurrentUser ? handleStatusKeyDown : undefined}
+              role={isCurrentUser ? "button" : undefined}
+              tabIndex={isCurrentUser ? 0 : undefined}
+              title={isCurrentUser ? undefined : user.nickname}
+            >
+              <div className="avatar-wrap">
+                <UserAvatar user={user} />
+                <span className={`presence-dot ${user.isOnline ? "online" : "offline"}`} />
+              </div>
+              <span className="status-name">{user.nickname}</span>
+              {user.todayMood ? (
+                <span className="status-mood-badge">
+                  <span className="mood-emoji">{user.todayMood.emoji}</span>
+                </span>
+              ) : null}
+              {isCurrentUser ? <span className="status-self">我</span> : null}
+              {isCurrentUser && pickerOpen ? (
+                <div className="status-mood-picker" onClick={(event) => event.stopPropagation()}>
+                  {props.moodOptions.map((emoji) => (
+                    <button
+                      type="button"
+                      className={user.todayMood?.emoji === emoji ? "selected" : ""}
+                      disabled={props.moodLoading}
+                      key={emoji}
+                      onClick={(event) => handleMoodClick(event, emoji)}
+                    >
+                      <span className="mood-emoji">{emoji}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            <div className="status-text">
-              <strong>{user.nickname}</strong>
-              {user.id === props.currentUserId ? <span>我</span> : null}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

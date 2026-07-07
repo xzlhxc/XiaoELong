@@ -1,20 +1,22 @@
-import { mkdirSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
+import type { ClientToServerEvents, ServerToClientEvents } from "@xiaoelong/shared";
+import type { Server } from "socket.io";
 import multer from "multer";
 import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
 import { env } from "../config/env.js";
-import { createUser } from "../db/users.js";
+import { createUser, deleteUserById } from "../db/users.js";
 import { requireAuth } from "../middleware/auth.js";
+import { listPresenceUsers } from "../socket/index.js";
+import { avatarDir, ensureUploadDirs, resolveAvatarPath } from "../utils/uploads.js";
 import { signAccessToken } from "../utils/jwt.js";
 
 const router = Router();
 
-const avatarDir = path.resolve(process.cwd(), "uploads", "avatars");
-mkdirSync(avatarDir, { recursive: true });
+ensureUploadDirs();
 
 const storage = multer.diskStorage({
   destination(_req, _file, cb) {
@@ -116,5 +118,40 @@ router.get("/me", requireAuth, (req, res) => {
 
   res.json({ user: req.user });
 });
+
+export function createAuthRouter(io: Server<ClientToServerEvents, ServerToClientEvents>): Router {
+  router.delete("/me", requireAuth, async (req, res, next) => {
+    if (!req.user) {
+      res.status(401).json({ message: "Unauthorized." });
+      return;
+    }
+
+    const deletedUserId = req.user.id;
+    const avatarPath = resolveAvatarPath(req.user.avatarUrl);
+
+    try {
+      const deleted = await deleteUserById(deletedUserId);
+      if (!deleted) {
+        res.status(404).json({ message: "User not found." });
+        return;
+      }
+
+      if (avatarPath) {
+        await safeDelete(avatarPath);
+      }
+
+      io.in(`user:${deletedUserId}`).disconnectSockets(true);
+      io.emit("presence:init", {
+        users: await listPresenceUsers()
+      });
+
+      res.json({ ok: true, deletedUserId });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  return router;
+}
 
 export default router;
