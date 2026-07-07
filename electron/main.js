@@ -10,8 +10,10 @@ const AVATAR_MOOD_WIDTH = 356;
 const AVATAR_HEIGHT = 190;
 const PANEL_WIDTH = 560;
 const PANEL_HEIGHT = 560;
-const SETTINGS_PANEL_WIDTH = 220;
-const SETTINGS_PANEL_HEIGHT = 214;
+const SETTINGS_PANEL_WIDTH = 320;
+const SETTINGS_PANEL_HEIGHT = 420;
+const IMAGE_VIEWER_WIDTH = 840;
+const IMAGE_VIEWER_HEIGHT = 640;
 const PANEL_GAP = 12;
 const PANEL_READY_FALLBACK_MS = 150;
 const DESKTOP_MARGIN_RIGHT = 28;
@@ -20,6 +22,7 @@ const DESKTOP_MARGIN_BOTTOM = 34;
 let authWindow = null;
 let avatarWindow = null;
 let panelWindow = null;
+let imageViewerWindow = null;
 let tray = null;
 let serverProcess = null;
 let dragOffset = null;
@@ -32,6 +35,11 @@ let panelRendererReady = false;
 let pendingPanelShow = false;
 let panelReadyFallbackTimer = null;
 let avatarMoodPromptVisible = false;
+let imageViewerState = {
+  images: [],
+  index: 0
+};
+let imageViewerReady = false;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(value, max));
@@ -45,6 +53,17 @@ function getBottomRightBounds(width, height) {
     y: workArea.y + workArea.height - height - DESKTOP_MARGIN_BOTTOM,
     width,
     height
+  };
+}
+
+function getCenteredBounds(width, height, referenceBounds = null) {
+  const display = referenceBounds ? screen.getDisplayMatching(referenceBounds) : screen.getPrimaryDisplay();
+  const workArea = display.workArea;
+  return {
+    x: Math.round(workArea.x + (workArea.width - width) / 2),
+    y: Math.round(workArea.y + (workArea.height - height) / 2),
+    width: Math.min(width, workArea.width),
+    height: Math.min(height, workArea.height)
   };
 }
 
@@ -75,7 +94,7 @@ function clampAvatarBounds(bounds) {
 
 function getAvatarSize() {
   return {
-    width: avatarMoodPromptVisible ? AVATAR_MOOD_WIDTH : AVATAR_WIDTH,
+    width: AVATAR_MOOD_WIDTH,
     height: AVATAR_HEIGHT
   };
 }
@@ -99,23 +118,6 @@ function setAvatarMoodPromptVisible(visible) {
   }
 
   avatarMoodPromptVisible = visible;
-  if (!avatarWindow || avatarWindow.isDestroyed()) {
-    return;
-  }
-
-  const bounds = avatarWindow.getBounds();
-  const nextSize = getAvatarSize();
-  const right = bounds.x + bounds.width;
-  avatarWindow.setBounds(
-    clampAvatarBounds({
-      x: right - nextSize.width,
-      y: bounds.y,
-      width: nextSize.width,
-      height: nextSize.height
-    }),
-    false
-  );
-
   if (panelOpen) {
     updatePanelBounds();
   }
@@ -136,8 +138,8 @@ function getPanelSize(avatarBounds) {
   const workArea = display.workArea;
   if (currentPanelView === "settings") {
     return {
-      width: Math.min(SETTINGS_PANEL_WIDTH, Math.max(200, workArea.width - AVATAR_WIDTH - PANEL_GAP - 24)),
-      height: Math.min(SETTINGS_PANEL_HEIGHT, Math.max(200, workArea.height - 16))
+      width: Math.min(SETTINGS_PANEL_WIDTH, Math.max(300, workArea.width - AVATAR_WIDTH - PANEL_GAP - 24)),
+      height: Math.min(SETTINGS_PANEL_HEIGHT, Math.max(360, workArea.height - 16))
     };
   }
 
@@ -148,7 +150,7 @@ function getPanelSize(avatarBounds) {
 }
 
 function getPanelMinimumSize() {
-  return currentPanelView === "settings" ? [200, 200] : [320, 420];
+  return currentPanelView === "settings" ? [300, 360] : [320, 420];
 }
 
 function getPanelBounds(avatarBounds, placement) {
@@ -328,7 +330,7 @@ function getTrayIcon() {
 }
 
 function hideAllWindows() {
-  for (const targetWindow of [authWindow, avatarWindow, panelWindow]) {
+  for (const targetWindow of [authWindow, avatarWindow, panelWindow, imageViewerWindow]) {
     if (targetWindow && !targetWindow.isDestroyed()) {
       targetWindow.hide();
     }
@@ -429,7 +431,7 @@ function createAvatarWindow() {
   const avatarSize = getAvatarSize();
   avatarWindow = new BrowserWindow({
     ...getBottomRightBounds(avatarSize.width, avatarSize.height),
-    minWidth: AVATAR_WIDTH,
+    minWidth: AVATAR_MOOD_WIDTH,
     minHeight: AVATAR_HEIGHT,
     frame: false,
     transparent: true,
@@ -492,6 +494,266 @@ function createPanelWindow() {
     clearPanelReadyFallback();
   });
   return panelWindow;
+}
+
+function getImageViewerHtml() {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:3001 http://127.0.0.1:3001 data: blob:; img-src * data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #eef1f3;
+      color: #263238;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      user-select: none;
+    }
+    .viewer {
+      display: grid;
+      grid-template-rows: 42px minmax(0, 1fr) 34px;
+      width: 100vw;
+      height: 100vh;
+      padding: 10px;
+      gap: 8px;
+    }
+    .topbar {
+      -webkit-app-region: drag;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    .meta {
+      min-width: 0;
+      overflow: hidden;
+      color: rgba(38, 50, 56, 0.72);
+      font-size: 13px;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    button {
+      -webkit-app-region: no-drag;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid rgba(83, 101, 111, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.82);
+      color: #263238;
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover { background: #fff; }
+    .close {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      font-size: 24px;
+      line-height: 1;
+    }
+    .stage {
+      position: relative;
+      display: grid;
+      min-height: 0;
+      place-items: center;
+      overflow: hidden;
+      border-radius: 14px;
+      background: #dde3e7;
+    }
+    img {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .nav {
+      position: absolute;
+      top: 50%;
+      width: 44px;
+      height: 44px;
+      border: 0;
+      background: transparent;
+      color: rgba(38, 50, 56, 0.76);
+      padding: 0;
+      font-size: 44px;
+      line-height: 1;
+      transform: translateY(-50%);
+    }
+    .nav:hover {
+      background: transparent;
+      color: #263238;
+    }
+    .previous { left: 12px; }
+    .next { right: 12px; }
+    .caption {
+      min-width: 0;
+      overflow: hidden;
+      color: rgba(38, 50, 56, 0.66);
+      font-size: 12px;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <main class="viewer">
+    <header class="topbar">
+      <div class="meta" id="meta"></div>
+      <button type="button" class="close" id="close" aria-label="关闭">×</button>
+    </header>
+    <section class="stage">
+      <button type="button" class="nav previous" id="previous" aria-label="上一张">‹</button>
+      <img id="image" alt="" />
+      <button type="button" class="nav next" id="next" aria-label="下一张">›</button>
+    </section>
+    <div class="caption" id="caption"></div>
+  </main>
+  <script>
+    const meta = document.getElementById("meta");
+    const caption = document.getElementById("caption");
+    const image = document.getElementById("image");
+    const previous = document.getElementById("previous");
+    const next = document.getElementById("next");
+    const close = document.getElementById("close");
+
+    function render(state) {
+      const images = state.images || [];
+      const current = images[state.index] || null;
+      previous.style.display = images.length > 1 ? "inline-grid" : "none";
+      next.style.display = images.length > 1 ? "inline-grid" : "none";
+      if (!current) {
+        meta.textContent = "";
+        caption.textContent = "";
+        image.removeAttribute("src");
+        image.alt = "";
+        return;
+      }
+      meta.textContent = (state.index + 1) + "/" + images.length + " · " + (current.userNickname || "");
+      caption.textContent = current.name || "";
+      image.src = current.url;
+      image.alt = current.name || "";
+    }
+
+    previous.addEventListener("click", () => window.xiaoelongImageViewer.previous());
+    next.addEventListener("click", () => window.xiaoelongImageViewer.next());
+    close.addEventListener("click", () => window.xiaoelongImageViewer.close());
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        window.xiaoelongImageViewer.close();
+      } else if (event.key === "ArrowLeft") {
+        window.xiaoelongImageViewer.previous();
+      } else if (event.key === "ArrowRight") {
+        window.xiaoelongImageViewer.next();
+      }
+    });
+    window.xiaoelongImageViewer.onStateChange(render);
+  </script>
+</body>
+</html>`;
+}
+
+function sendImageViewerState() {
+  if (!imageViewerWindow || imageViewerWindow.isDestroyed() || !imageViewerReady) {
+    return;
+  }
+
+  imageViewerWindow.webContents.send("desktop:image-viewer-state", imageViewerState);
+}
+
+function createImageViewerWindow(referenceBounds = null) {
+  if (imageViewerWindow) {
+    return imageViewerWindow;
+  }
+
+  imageViewerReady = false;
+  imageViewerWindow = new BrowserWindow({
+    ...getCenteredBounds(IMAGE_VIEWER_WIDTH, IMAGE_VIEWER_HEIGHT, referenceBounds),
+    minWidth: 480,
+    minHeight: 360,
+    frame: false,
+    transparent: false,
+    backgroundColor: "#eef1f3",
+    resizable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: getWebPreferences("imageViewer")
+  });
+
+  imageViewerWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getImageViewerHtml())}`);
+  imageViewerWindow.webContents.once("did-finish-load", () => {
+    imageViewerReady = true;
+    sendImageViewerState();
+  });
+  imageViewerWindow.on("closed", () => {
+    imageViewerWindow = null;
+    imageViewerReady = false;
+  });
+  return imageViewerWindow;
+}
+
+function showImageViewer(payload) {
+  const images = Array.isArray(payload?.images)
+    ? payload.images
+        .map((image) => ({
+          url: typeof image?.url === "string" ? image.url : "",
+          name: typeof image?.name === "string" ? image.name : "",
+          userNickname: typeof image?.userNickname === "string" ? image.userNickname : ""
+        }))
+        .filter((image) => image.url)
+    : [];
+
+  if (images.length === 0) {
+    return;
+  }
+
+  const nextIndex = clamp(Number(payload?.index) || 0, 0, images.length - 1);
+  imageViewerState = {
+    images,
+    index: nextIndex
+  };
+
+  const referenceWindow = panelWindow && !panelWindow.isDestroyed() ? panelWindow : avatarWindow;
+  const referenceBounds = referenceWindow && !referenceWindow.isDestroyed() ? referenceWindow.getBounds() : null;
+  const targetWindow = createImageViewerWindow(referenceBounds);
+  targetWindow.setBounds(getCenteredBounds(IMAGE_VIEWER_WIDTH, IMAGE_VIEWER_HEIGHT, referenceBounds), false);
+  sendImageViewerState();
+  if (!targetWindow.isVisible()) {
+    targetWindow.show();
+  }
+  targetWindow.focus();
+}
+
+function showPreviousImage() {
+  if (imageViewerState.images.length === 0) {
+    return;
+  }
+
+  imageViewerState = {
+    ...imageViewerState,
+    index: (imageViewerState.index - 1 + imageViewerState.images.length) % imageViewerState.images.length
+  };
+  sendImageViewerState();
+}
+
+function showNextImage() {
+  if (imageViewerState.images.length === 0) {
+    return;
+  }
+
+  imageViewerState = {
+    ...imageViewerState,
+    index: (imageViewerState.index + 1) % imageViewerState.images.length
+  };
+  sendImageViewerState();
 }
 
 function sendPanelPlacement() {
@@ -670,6 +932,24 @@ ipcMain.on("desktop:open-settings", () => {
 
 ipcMain.on("desktop:hide-all-windows", () => {
   hideAllWindows();
+});
+
+ipcMain.on("desktop:image-viewer-open", (_event, payload) => {
+  showImageViewer(payload);
+});
+
+ipcMain.on("desktop:image-viewer-close", () => {
+  if (imageViewerWindow && !imageViewerWindow.isDestroyed()) {
+    imageViewerWindow.hide();
+  }
+});
+
+ipcMain.on("desktop:image-viewer-previous", () => {
+  showPreviousImage();
+});
+
+ipcMain.on("desktop:image-viewer-next", () => {
+  showNextImage();
 });
 
 ipcMain.on("desktop:login", (_event, token) => {

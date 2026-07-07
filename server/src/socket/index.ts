@@ -11,7 +11,7 @@ import { listDailyMoodsByUserId } from "../db/daily-moods.js";
 import { createMessage } from "../db/messages.js";
 import { listUsers, getUserById } from "../db/users.js";
 import { GomokuService, GomokuValidationError } from "../services/gomoku-service.js";
-import { normalizeChatContent } from "../utils/chat.js";
+import { normalizeChatContent, normalizeChatFile, normalizeChatImage } from "../utils/chat.js";
 import { verifyAccessToken } from "../utils/jwt.js";
 
 const MAIN_ROOM = "room:main";
@@ -142,7 +142,39 @@ export function setupSocket(
     }
 
     socket.on("chat:send", async (payload, ack) => {
-      const normalized = normalizeChatContent(payload?.content);
+      const imagePayload = payload?.image ?? null;
+      const filePayload = payload?.file ?? null;
+      if (imagePayload && filePayload) {
+        ack?.({
+          ok: false,
+          error: "Only one attachment is allowed per message."
+        });
+        return;
+      }
+
+      const normalizedImage = imagePayload ? normalizeChatImage(imagePayload) : null;
+      if (normalizedImage && !normalizedImage.ok) {
+        ack?.({
+          ok: false,
+          error: normalizedImage.error
+        });
+        return;
+      }
+
+      const image = normalizedImage?.image ?? null;
+      const normalizedFile = filePayload ? normalizeChatFile(filePayload) : null;
+      if (normalizedFile && !normalizedFile.ok) {
+        ack?.({
+          ok: false,
+          error: normalizedFile.error
+        });
+        return;
+      }
+
+      const file = normalizedFile?.file ?? null;
+      const normalized = normalizeChatContent(payload?.content ?? "", {
+        allowEmpty: Boolean(image || file)
+      });
       if (!normalized.ok) {
         ack?.({
           ok: false,
@@ -152,7 +184,11 @@ export function setupSocket(
       }
 
       try {
-        const message = await createMessage(userId, normalized.content);
+        const message = await createMessage(userId, {
+          content: normalized.content,
+          image,
+          file
+        });
         io.to(MAIN_ROOM).emit("chat:message", message);
         ack?.({ ok: true });
       } catch {

@@ -9,6 +9,14 @@ CREATE TABLE IF NOT EXISTS messages (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   user_id VARCHAR(36) NOT NULL,
   content TEXT NOT NULL,
+  image_url VARCHAR(255) NULL,
+  image_name VARCHAR(255) NULL,
+  image_mime_type VARCHAR(64) NULL,
+  image_size INT NULL,
+  file_url VARCHAR(255) NULL,
+  file_name VARCHAR(255) NULL,
+  file_mime_type VARCHAR(128) NULL,
+  file_size INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_messages_created_at (created_at),
   KEY idx_messages_user_created_at (user_id, created_at),
@@ -16,6 +24,86 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (user_id) REFERENCES users(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @add_messages_image_url = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'image_url') = 0,
+  'ALTER TABLE messages ADD COLUMN image_url VARCHAR(255) NULL AFTER content',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_image_url;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_image_name = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'image_name') = 0,
+  'ALTER TABLE messages ADD COLUMN image_name VARCHAR(255) NULL AFTER image_url',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_image_name;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_image_mime_type = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'image_mime_type') = 0,
+  'ALTER TABLE messages ADD COLUMN image_mime_type VARCHAR(64) NULL AFTER image_name',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_image_mime_type;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_image_size = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'image_size') = 0,
+  'ALTER TABLE messages ADD COLUMN image_size INT NULL AFTER image_mime_type',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_image_size;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_file_url = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'file_url') = 0,
+  'ALTER TABLE messages ADD COLUMN file_url VARCHAR(255) NULL AFTER image_size',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_file_url;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_file_name = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'file_name') = 0,
+  'ALTER TABLE messages ADD COLUMN file_name VARCHAR(255) NULL AFTER file_url',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_file_name;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_file_mime_type = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'file_mime_type') = 0,
+  'ALTER TABLE messages ADD COLUMN file_mime_type VARCHAR(128) NULL AFTER file_name',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_file_mime_type;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_file_size = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'file_size') = 0,
+  'ALTER TABLE messages ADD COLUMN file_size INT NULL AFTER file_mime_type',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_file_size;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS daily_questions (
   id INT AUTO_INCREMENT PRIMARY KEY,

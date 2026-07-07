@@ -8,7 +8,7 @@ import multer from "multer";
 import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
 import { env } from "../config/env.js";
-import { createUser, deleteUserById } from "../db/users.js";
+import { createUser, deleteUserById, updateUserProfile } from "../db/users.js";
 import { requireAuth } from "../middleware/auth.js";
 import { listPresenceUsers } from "../socket/index.js";
 import { avatarDir, ensureUploadDirs, resolveAvatarPath } from "../utils/uploads.js";
@@ -44,6 +44,10 @@ const avatarUpload = multer({
 
 const joinSchema = z.object({
   inviteCode: z.string().trim().min(1),
+  nickname: z.string().trim().min(1).max(32)
+});
+
+const profileSchema = z.object({
   nickname: z.string().trim().min(1).max(32)
 });
 
@@ -120,6 +124,79 @@ router.get("/me", requireAuth, (req, res) => {
 });
 
 export function createAuthRouter(io: Server<ClientToServerEvents, ServerToClientEvents>): Router {
+  router.put("/me", requireAuth, avatarUpload.single("avatar"), async (req, res, next) => {
+    if (!req.user) {
+      if (req.file) {
+        await safeDelete(req.file.path);
+      }
+      res.status(401).json({ message: "Unauthorized." });
+      return;
+    }
+
+    const parsed = profileSchema.safeParse({
+      nickname: req.body.nickname
+    });
+
+    if (!parsed.success) {
+      if (req.file) {
+        await safeDelete(req.file.path);
+      }
+      res.status(400).json({ message: "Invalid nickname." });
+      return;
+    }
+
+    const safeNickname = sanitizeHtml(parsed.data.nickname, {
+      allowedTags: [],
+      allowedAttributes: {}
+    }).trim();
+
+    if (!safeNickname) {
+      if (req.file) {
+        await safeDelete(req.file.path);
+      }
+      res.status(400).json({ message: "Nickname is required." });
+      return;
+    }
+
+    const previousAvatarPath = resolveAvatarPath(req.user.avatarUrl);
+    const nextAvatarUrl = req.file ? `/uploads/avatars/${req.file.filename}` : undefined;
+
+    try {
+      const user = await updateUserProfile(req.user.id, {
+        nickname: safeNickname,
+        ...(nextAvatarUrl ? { avatarUrl: nextAvatarUrl } : {})
+      });
+
+      if (!user) {
+        if (req.file) {
+          await safeDelete(req.file.path);
+        }
+        res.status(404).json({ message: "User not found." });
+        return;
+      }
+
+      if (req.file && previousAvatarPath && previousAvatarPath !== req.file.path) {
+        await safeDelete(previousAvatarPath);
+      }
+
+      io.emit("user:update", { user });
+      void listPresenceUsers()
+        .then((users) => {
+          io.emit("presence:init", { users });
+        })
+        .catch((error: unknown) => {
+          console.error("[Auth] profile presence broadcast failed:", error);
+        });
+
+      res.json({ user });
+    } catch (error) {
+      if (req.file) {
+        await safeDelete(req.file.path);
+      }
+      next(error);
+    }
+  });
+
   router.delete("/me", requireAuth, async (req, res, next) => {
     if (!req.user) {
       res.status(401).json({ message: "Unauthorized." });

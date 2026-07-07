@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("xiaoelongDesktop", {
   hideAllWindows: () => ipcRenderer.send("desktop:hide-all-windows"),
   previewMoodPrompt: () => ipcRenderer.send("desktop:mood-preview"),
   setMoodPromptVisible: (visible) => ipcRenderer.send("desktop:mood-prompt-visible", visible),
+  openImageViewer: (payload) => ipcRenderer.send("desktop:image-viewer-open", payload),
   requestLogout: () => ipcRenderer.send("desktop:logout"),
   getSettings: () => ipcRenderer.invoke("desktop:settings:get"),
   setLoginAtStartup: (enabled) => ipcRenderer.invoke("desktop:settings:set-login-at-startup", enabled),
@@ -50,4 +51,15 @@ contextBridge.exposeInMainWorld("xiaoelongDesktop", {
   startDrag: () => ipcRenderer.send("desktop:drag-start"),
   moveDrag: () => ipcRenderer.send("desktop:drag-move"),
   endDrag: () => ipcRenderer.send("desktop:drag-end")
+});
+
+contextBridge.exposeInMainWorld("xiaoelongImageViewer", {
+  close: () => ipcRenderer.send("desktop:image-viewer-close"),
+  previous: () => ipcRenderer.send("desktop:image-viewer-previous"),
+  next: () => ipcRenderer.send("desktop:image-viewer-next"),
+  onStateChange: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("desktop:image-viewer-state", listener);
+    return () => ipcRenderer.removeListener("desktop:image-viewer-state", listener);
+  }
 });

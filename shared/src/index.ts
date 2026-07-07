@@ -21,10 +21,26 @@ export interface PresenceUser extends UserProfile {
   todayMood: DailyMood | null;
 }
 
+export interface ChatImage {
+  url: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
+export interface ChatFile {
+  url: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: number;
   user: UserProfile;
   content: string;
+  image: ChatImage | null;
+  file: ChatFile | null;
   createdAt: string;
 }
 
@@ -37,6 +53,10 @@ export interface AuthMeResponse {
   user: UserProfile;
 }
 
+export interface AuthProfileUpdateResponse {
+  user: UserProfile;
+}
+
 export interface AuthDeleteResponse {
   ok: true;
   deletedUserId: string;
@@ -44,6 +64,14 @@ export interface AuthDeleteResponse {
 
 export interface ChatHistoryResponse {
   messages: ChatMessage[];
+}
+
+export interface ChatImageUploadResponse {
+  image: ChatImage;
+}
+
+export interface ChatFileUploadResponse {
+  file: ChatFile;
 }
 
 export interface DailyQuestion {
@@ -142,7 +170,9 @@ export interface PresenceDeltaPayload {
 }
 
 export interface ChatSendPayload {
-  content: string;
+  content?: string;
+  image?: ChatImage | null;
+  file?: ChatFile | null;
 }
 
 export interface ChatSendAck {
@@ -158,6 +188,10 @@ export interface DailyQuestionUpdatePayload {
 export interface DailyMoodUpdatePayload {
   userId: string;
   mood: DailyMood;
+}
+
+export interface UserUpdatePayload {
+  user: UserProfile;
 }
 
 export interface GomokuInvitePayload {
@@ -196,6 +230,7 @@ export interface ServerToClientEvents {
   "presence:init": (payload: PresenceInitPayload) => void;
   "presence:online": (payload: PresenceDeltaPayload) => void;
   "presence:offline": (payload: PresenceDeltaPayload) => void;
+  "user:update": (payload: UserUpdatePayload) => void;
   "chat:message": (message: ChatMessage) => void;
   "question:update": (payload: DailyQuestionUpdatePayload) => void;
   "mood:update": (payload: DailyMoodUpdatePayload) => void;

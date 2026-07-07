@@ -74,7 +74,11 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   }
 
   if (error instanceof Error) {
-    if (error.message === "Avatar must be an image file.") {
+    if (
+      error.message === "Avatar must be an image file." ||
+      error.message === "Chat image must be a jpg, png, webp, or gif file." ||
+      error.message === "Chat file type is not allowed."
+    ) {
       res.status(400).json({ message: error.message });
       return;
     }

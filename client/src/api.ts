@@ -2,6 +2,9 @@ import type {
   AuthJoinResponse,
   AuthDeleteResponse,
   AuthMeResponse,
+  AuthProfileUpdateResponse,
+  ChatFileUploadResponse,
+  ChatImageUploadResponse,
   ChatHistoryResponse,
   DailyQuestionAnswerResponse,
   DailyQuestionStats,
@@ -15,7 +18,7 @@ import type {
 } from "@xiaoelong/shared";
 import { serverUrl } from "./env";
 
-type HttpMethod = "GET" | "POST" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 interface RequestOptions {
   method?: HttpMethod;
@@ -75,9 +78,33 @@ export async function deleteCurrentUser(token: string): Promise<AuthDeleteRespon
   });
 }
 
+export async function updateCurrentProfile(token: string, formData: FormData): Promise<AuthProfileUpdateResponse> {
+  return requestJson<AuthProfileUpdateResponse>("/api/auth/me", {
+    method: "PUT",
+    token,
+    body: formData
+  });
+}
+
 export async function getRecentMessages(token: string, limit = 50): Promise<ChatHistoryResponse> {
   return requestJson<ChatHistoryResponse>(`/api/chat/messages?limit=${limit}`, {
     token
+  });
+}
+
+export async function uploadChatImage(token: string, formData: FormData): Promise<ChatImageUploadResponse> {
+  return requestJson<ChatImageUploadResponse>("/api/chat/images", {
+    method: "POST",
+    token,
+    body: formData
+  });
+}
+
+export async function uploadChatFile(token: string, formData: FormData): Promise<ChatFileUploadResponse> {
+  return requestJson<ChatFileUploadResponse>("/api/chat/files", {
+    method: "POST",
+    token,
+    body: formData
   });
 }
 

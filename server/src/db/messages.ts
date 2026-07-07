@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@xiaoelong/shared";
+import type { ChatFile, ChatImage, ChatMessage } from "@xiaoelong/shared";
 import type { ResultSetHeader } from "mysql2";
 import { mapMessageWithUserRow, type MessageWithUserRow } from "./mappers.js";
 import { pool } from "./pool.js";
@@ -7,6 +7,14 @@ const MESSAGE_WITH_USER_SELECT = `
   SELECT
     m.id,
     m.content,
+    m.image_url,
+    m.image_name,
+    m.image_mime_type,
+    m.image_size,
+    m.file_url,
+    m.file_name,
+    m.file_mime_type,
+    m.file_size,
     m.created_at,
     u.id AS user_id,
     u.nickname,
@@ -16,10 +24,39 @@ const MESSAGE_WITH_USER_SELECT = `
   INNER JOIN users u ON u.id = m.user_id
 `;
 
-export async function createMessage(userId: string, content: string): Promise<ChatMessage> {
+interface CreateMessageInput {
+  content: string;
+  image: ChatImage | null;
+  file: ChatFile | null;
+}
+
+export async function createMessage(userId: string, input: CreateMessageInput): Promise<ChatMessage> {
   const [result] = await pool.execute<ResultSetHeader>(
-    "INSERT INTO messages (user_id, content) VALUES (?, ?)",
-    [userId, content]
+    `INSERT INTO messages (
+       user_id,
+       content,
+       image_url,
+       image_name,
+       image_mime_type,
+       image_size,
+       file_url,
+       file_name,
+       file_mime_type,
+       file_size
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      input.content,
+      input.image?.url ?? null,
+      input.image?.name ?? null,
+      input.image?.mimeType ?? null,
+      input.image?.size ?? null,
+      input.file?.url ?? null,
+      input.file?.name ?? null,
+      input.file?.mimeType ?? null,
+      input.file?.size ?? null
+    ]
   );
 
   const [rows] = await pool.query<MessageWithUserRow[]>(

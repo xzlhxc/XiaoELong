@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MOOD_OPTIONS,
+  type ChatFile,
+  type ChatImage,
   type ChatMessage,
   type DailyMood,
   type DailyMoodUpdatePayload,
@@ -23,13 +25,17 @@ import {
   getTodayMood,
   joinWithInvite,
   setTodayMood,
-  submitTodayAnswer
+  submitTodayAnswer,
+  updateCurrentProfile,
+  uploadChatFile,
+  uploadChatImage
 } from "./api";
 import { AvatarDock } from "./components/AvatarDock";
 import { ChatPanel } from "./components/ChatPanel";
 import { DailyQuestionPanel } from "./components/DailyQuestionPanel";
 import { GomokuPanel } from "./components/GomokuPanel";
 import { JoinForm } from "./components/JoinForm";
+import { SettingsProfileForm } from "./components/SettingsProfileForm";
 import { StatusBar } from "./components/StatusBar";
 import { connectSocket, type AppSocket } from "./socket";
 
@@ -83,6 +89,41 @@ function applyPresenceDelta(current: PresenceUser[], payload: PresenceDeltaPaylo
 
 function applyMoodUpdate(current: PresenceUser[], userId: string, mood: DailyMood): PresenceUser[] {
   return current.map((user) => (user.id === userId ? { ...user, todayMood: mood } : user));
+}
+
+function applyUserUpdateToPresence(current: PresenceUser[], user: UserProfile): PresenceUser[] {
+  return current.map((item) => (item.id === user.id ? { ...item, ...user } : item));
+}
+
+function applyUserUpdateToMessages(current: ChatMessage[], user: UserProfile): ChatMessage[] {
+  return current.map((message) => (message.user.id === user.id ? { ...message, user } : message));
+}
+
+function applyUserUpdateToGames(current: GomokuGame[], user: UserProfile): GomokuGame[] {
+  return current.map((game) => ({
+    ...game,
+    playerBlack: game.playerBlack.id === user.id ? { ...game.playerBlack, ...user } : game.playerBlack,
+    playerWhite: game.playerWhite.id === user.id ? { ...game.playerWhite, ...user } : game.playerWhite
+  }));
+}
+
+function applyUserUpdateToDailyData(
+  current: DailyQuestionTodayResponse | null,
+  user: UserProfile
+): DailyQuestionTodayResponse | null {
+  if (!current) {
+    return current;
+  }
+
+  return {
+    ...current,
+    stats: {
+      ...current.stats,
+      voters: current.stats.voters.map((group) =>
+        group.map((voter) => (voter.id === user.id ? { ...voter, ...user } : voter))
+      )
+    }
+  };
 }
 
 function dedupeMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -154,7 +195,10 @@ export default function App(): JSX.Element {
   const [booting, setBooting] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [accountDeleting, setAccountDeleting] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [dailyError, setDailyError] = useState<string | null>(null);
   const [dailyLoading, setDailyLoading] = useState(false);
@@ -190,6 +234,9 @@ export default function App(): JSX.Element {
     setPanelView("home");
     setDeleteConfirmOpen(false);
     setAccountDeleting(false);
+    setProfileSaving(false);
+    setProfileError(null);
+    setProfileSaved(false);
     setSocketError(null);
   }, []);
 
@@ -340,6 +387,14 @@ export default function App(): JSX.Element {
       setPresenceUsers((prev) => updatePresenceStatus(prev, payload.onlineUserIds));
     });
 
+    socket.on("user:update", (payload) => {
+      setPresenceUsers((prev) => applyUserUpdateToPresence(prev, payload.user));
+      setMessages((prev) => applyUserUpdateToMessages(prev, payload.user));
+      setDailyData((prev) => applyUserUpdateToDailyData(prev, payload.user));
+      setGomokuGames((prev) => applyUserUpdateToGames(prev, payload.user));
+      setCurrentUser((prev) => (prev?.id === payload.user.id ? payload.user : prev));
+    });
+
     socket.on("chat:message", (message) => {
       setMessages((prev) => dedupeMessages([...prev, message]));
     });
@@ -486,7 +541,48 @@ export default function App(): JSX.Element {
     }
   }
 
-  async function handleSendMessage(content: string): Promise<void> {
+  async function handleUpdateProfile(payload: { nickname: string; avatarFile: File | null }): Promise<void> {
+    if (!token) {
+      setProfileError("登录已失效，请重新打开小鳄龙。");
+      return;
+    }
+
+    const nickname = payload.nickname.trim();
+    if (!nickname) {
+      setProfileError("昵称不能为空。");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("nickname", nickname);
+    if (payload.avatarFile) {
+      formData.append("avatar", payload.avatarFile);
+    }
+
+    setProfileSaving(true);
+    setProfileError(null);
+    setProfileSaved(false);
+
+    try {
+      const response = await updateCurrentProfile(token, formData);
+      setCurrentUser((prev) => (prev?.id === response.user.id ? response.user : prev));
+      setPresenceUsers((prev) => applyUserUpdateToPresence(prev, response.user));
+      setMessages((prev) => applyUserUpdateToMessages(prev, response.user));
+      setDailyData((prev) => applyUserUpdateToDailyData(prev, response.user));
+      setGomokuGames((prev) => applyUserUpdateToGames(prev, response.user));
+      setProfileSaved(true);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setProfileError(error.message);
+      } else {
+        setProfileError("保存资料失败，请重试。");
+      }
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function handleSendMessage(payload: { content: string; imageFile: File | null; fileFile: File | null }): Promise<void> {
     setSendError(null);
 
     const socket = socketRef.current;
@@ -495,32 +591,59 @@ export default function App(): JSX.Element {
       throw new Error("Socket not connected.");
     }
 
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
+    if (!token) {
+      setSendError("登录已失效，请重新打开小鳄龙。");
+      throw new Error("Missing token.");
+    }
+
+    try {
+      if (payload.imageFile && payload.fileFile) {
+        throw new Error("Only one attachment is allowed per message.");
+      }
+
+      let image: ChatImage | null = null;
+      if (payload.imageFile) {
+        const formData = new FormData();
+        formData.append("image", payload.imageFile);
+        const result = await uploadChatImage(token, formData);
+        image = result.image;
+      }
+
+      let file: ChatFile | null = null;
+      if (payload.fileFile) {
+        const formData = new FormData();
+        formData.append("file", payload.fileFile);
+        const result = await uploadChatFile(token, formData);
+        file = result.file;
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error("Message send timeout."));
+          }
+        }, 5000);
+
+        socket.emit("chat:send", { content: payload.content, image, file }, (ack) => {
+          if (settled) {
+            return;
+          }
           settled = true;
-          reject(new Error("Message send timeout."));
-        }
-      }, 5000);
+          clearTimeout(timer);
 
-      socket.emit("chat:send", { content }, (ack) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-
-        if (!ack.ok) {
-          reject(new Error(ack.error || "发送失败。"));
-          return;
-        }
-        resolve();
+          if (!ack.ok) {
+            reject(new Error(ack.error || "发送失败。"));
+            return;
+          }
+          resolve();
+        });
       });
-    }).catch((error) => {
+    } catch (error) {
       setSendError(error instanceof Error ? error.message : "发送失败。");
       throw error;
-    });
+    }
   }
 
   async function handleAnswerDaily(answerIndex: number): Promise<void> {
@@ -805,6 +928,13 @@ export default function App(): JSX.Element {
   const settingsPanel = currentUser ? (
     <div className={`panel settings-panel ${deleteConfirmOpen ? "confirming" : ""}`}>
       <div className="settings-content">
+        <SettingsProfileForm
+          user={currentUser}
+          loading={profileSaving}
+          error={profileError}
+          saved={profileSaved}
+          onSubmit={handleUpdateProfile}
+        />
       <header className="topbar settings-topbar">
         <div className="panel-action-buttons" aria-label="设置操作">
           <button type="button" className="ghost-button" onClick={handleHideAllWindows}>

@@ -17,6 +17,8 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().min(1).default("30d"),
   MAX_MESSAGE_LENGTH: z.coerce.number().int().positive().default(1000),
   MAX_AVATAR_SIZE_MB: z.coerce.number().positive().default(3),
+  MAX_CHAT_IMAGE_SIZE_MB: z.coerce.number().positive().default(5),
+  MAX_CHAT_FILE_SIZE_MB: z.coerce.number().positive().default(50),
   UPLOAD_ROOT: z.string().trim().optional(),
   DEEPSEEK_API_KEY: z.string().trim().optional(),
   DEEPSEEK_BASE_URL: z.string().trim().url().default("https://api.deepseek.com"),

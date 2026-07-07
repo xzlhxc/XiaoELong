@@ -11,7 +11,7 @@ interface ImportMeta {
 interface Window {
   readonly xiaoelongDesktop?: {
     readonly isDesktop: boolean;
-    readonly role?: "auth" | "avatar" | "panel";
+    readonly role?: "auth" | "avatar" | "panel" | "imageViewer";
     readonly setWindowMode?: (mode: "auth" | "collapsed" | "expanded") => void;
     readonly toggleHomePanel?: () => void;
     readonly openSettingsPanel?: () => void;
@@ -20,6 +20,14 @@ interface Window {
     readonly hideAllWindows?: () => void;
     readonly previewMoodPrompt?: () => void;
     readonly setMoodPromptVisible?: (visible: boolean) => void;
+    readonly openImageViewer?: (payload: {
+      images: Array<{
+        url: string;
+        name: string;
+        userNickname: string;
+      }>;
+      index: number;
+    }) => void;
     readonly requestLogout?: () => void;
     readonly getSettings?: () => Promise<{
       openAtLogin: boolean;
@@ -46,5 +54,21 @@ interface Window {
     readonly startDrag?: () => void;
     readonly moveDrag?: () => void;
     readonly endDrag?: () => void;
+  };
+
+  readonly xiaoelongImageViewer?: {
+    readonly close: () => void;
+    readonly previous: () => void;
+    readonly next: () => void;
+    readonly onStateChange: (
+      callback: (state: {
+        images: Array<{
+          url: string;
+          name: string;
+          userNickname: string;
+        }>;
+        index: number;
+      }) => void
+    ) => () => void;
   };
 }

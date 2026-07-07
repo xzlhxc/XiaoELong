@@ -2,7 +2,7 @@ import type { DailyMood, MoodEmoji } from "@xiaoelong/shared";
 import { MOOD_OPTIONS } from "@xiaoelong/shared";
 import type { RowDataPacket } from "mysql2";
 import { pool } from "./pool.js";
-import { getResetDayInTimezone } from "../utils/time.js";
+import { getResetDayInTimezone, toIsoString } from "../utils/time.js";
 
 const MOOD_TIMEZONE = "Asia/Shanghai";
 const MOOD_RESET_HOUR = 8;
@@ -20,10 +20,6 @@ export function getCurrentMoodDay(now = new Date()): string {
 
 export function isMoodEmoji(value: unknown): value is MoodEmoji {
   return typeof value === "string" && (MOOD_OPTIONS as readonly string[]).includes(value);
-}
-
-function toIsoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 function mapDailyMoodRow(row: DailyMoodRow): DailyMood {
