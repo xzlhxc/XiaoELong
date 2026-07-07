@@ -1,5 +1,7 @@
 node_modules/
 dist/
+release/
+*.tsbuildinfo
 *.log
 
 .env
@@ -7,4 +9,6 @@ dist/
 !.env.example
 
 server/uploads/avatars/*
+server/uploads/chat-files/*
+server/uploads/chat-images/*
 !server/uploads/avatars/.gitkeep
