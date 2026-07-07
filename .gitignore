@@ -3,11 +3,15 @@ dist/
 release/
 *.tsbuildinfo
 *.log
+.local-logs/
 
 .env
 .env.*
 !.env.example
 
+uploads/
+client/vite.config.js
+client/vite.config.d.ts
 server/uploads/avatars/*
 server/uploads/chat-files/*
 server/uploads/chat-images/*

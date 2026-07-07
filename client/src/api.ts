@@ -7,14 +7,11 @@ import type {
   ChatImageUploadResponse,
   ChatHistoryResponse,
   DailyQuestionAnswerResponse,
-  DailyQuestionStats,
   DailyQuestionTodayResponse,
   DailyMoodSetPayload,
   DailyMoodSetResponse,
   DailyMoodTodayResponse,
-  GomokuGamesResponse,
-  GomokuInviteResponse,
-  GomokuMoveResponse
+  GomokuGamesResponse
 } from "@xiaoelong/shared";
 import { serverUrl } from "./env";
 
@@ -123,12 +120,6 @@ export async function submitTodayAnswer(
   });
 }
 
-export async function getQuestionStats(token: string, questionId: number): Promise<{ stats: DailyQuestionStats }> {
-  return requestJson<{ stats: DailyQuestionStats }>(`/api/daily-question/stats?questionId=${questionId}`, {
-    token
-  });
-}
-
 export async function getTodayMood(token: string): Promise<DailyMoodTodayResponse> {
   return requestJson<DailyMoodTodayResponse>("/api/daily-mood/today", { token });
 }
@@ -143,31 +134,4 @@ export async function setTodayMood(token: string, payload: DailyMoodSetPayload):
 
 export async function getGomokuGames(token: string): Promise<GomokuGamesResponse> {
   return requestJson<GomokuGamesResponse>("/api/gomoku/games", { token });
-}
-
-export async function inviteGomoku(token: string, targetUserId: string): Promise<GomokuInviteResponse> {
-  return requestJson<GomokuInviteResponse>("/api/gomoku/invite", {
-    method: "POST",
-    token,
-    body: JSON.stringify({ targetUserId })
-  });
-}
-
-export async function acceptGomoku(token: string, gameId: number): Promise<GomokuInviteResponse> {
-  return requestJson<GomokuInviteResponse>("/api/gomoku/accept", {
-    method: "POST",
-    token,
-    body: JSON.stringify({ gameId })
-  });
-}
-
-export async function moveGomoku(
-  token: string,
-  payload: { gameId: number; row: number; col: number }
-): Promise<GomokuMoveResponse> {
-  return requestJson<GomokuMoveResponse>("/api/gomoku/move", {
-    method: "POST",
-    token,
-    body: JSON.stringify(payload)
-  });
 }

@@ -203,14 +203,6 @@ body {
   padding: 14px;
 }
 
-.status-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.status-header h2,
 .chat-panel h2,
 .module-card h2 {
   margin: 0;
@@ -271,17 +263,6 @@ body {
 
 .presence-dot.offline {
   background: #9ea7a4;
-}
-
-.status-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.status-text span {
-  color: #5b6d67;
-  font-size: 12px;
 }
 
 .module-tabs {
@@ -465,19 +446,6 @@ button:disabled {
 .gomoku-right h3 {
   margin: 0 0 8px;
   font-size: 15px;
-}
-
-.gomoku-invite-list {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.gomoku-invite-list button {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
 }
 
 .gomoku-game-list {
@@ -748,11 +716,6 @@ button:disabled {
   padding: 10px;
 }
 
-.desktop-runtime .status-header {
-  margin-bottom: 7px;
-}
-
-.desktop-runtime .status-header h2,
 .desktop-runtime .chat-panel h2,
 .desktop-runtime .module-card h2 {
   font-size: 15px;
@@ -805,8 +768,7 @@ button:disabled {
 
 .desktop-runtime .question-options,
 .desktop-runtime .question-stats,
-.desktop-runtime .gomoku-game-list,
-.desktop-runtime .gomoku-invite-list {
+.desktop-runtime .gomoku-game-list {
   gap: 6px;
 }
 
@@ -850,36 +812,6 @@ button:disabled {
   gap: 7px;
   overflow-x: auto;
   padding-bottom: 2px;
-}
-
-.status-list::-webkit-scrollbar,
-.chat-list::-webkit-scrollbar,
-.daily-content::-webkit-scrollbar,
-.question-stats::-webkit-scrollbar,
-.gomoku-game-list::-webkit-scrollbar,
-.invite-candidate-list::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-}
-
-.status-list:hover::-webkit-scrollbar,
-.chat-list:hover::-webkit-scrollbar,
-.daily-content:hover::-webkit-scrollbar,
-.question-stats:hover::-webkit-scrollbar,
-.gomoku-game-list:hover::-webkit-scrollbar,
-.invite-candidate-list:hover::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.status-list:hover::-webkit-scrollbar-thumb,
-.chat-list:hover::-webkit-scrollbar-thumb,
-.daily-content:hover::-webkit-scrollbar-thumb,
-.question-stats:hover::-webkit-scrollbar-thumb,
-.gomoku-game-list:hover::-webkit-scrollbar-thumb,
-.invite-candidate-list:hover::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(76, 129, 112, 0.24);
 }
 
 .status-item {
@@ -1347,8 +1279,7 @@ button:disabled {
   padding-inline: 13px;
 }
 
-.chat-attachment-input,
-.chat-image-input {
+.chat-attachment-input {
   display: none;
 }
 
@@ -2013,12 +1944,6 @@ button:disabled {
 
 .danger-button:hover {
   background: #ffe3dc;
-}
-
-.settings-body {
-  display: grid;
-  min-height: 0;
-  align-content: start;
 }
 
 .settings-profile {

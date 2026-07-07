@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ClientToServerEvents, ServerToClientEvents } from "@xiaoelong/shared";
 import { requireAuth } from "../middleware/auth.js";
 import { GomokuService, GomokuValidationError } from "../services/gomoku-service.js";
+import { emitGomokuUpdate } from "../socket/gomoku-events.js";
 
 const inviteSchema = z.object({
   targetUserId: z.string().trim().min(1)
@@ -18,15 +19,6 @@ const moveSchema = z.object({
   row: z.coerce.number().int().min(0).max(14),
   col: z.coerce.number().int().min(0).max(14)
 });
-
-function notifyGameUpdate(io: Server<ClientToServerEvents, ServerToClientEvents>, game: import("@xiaoelong/shared").GomokuGame): void {
-  io.to(`user:${game.playerBlack.id}`).emit("gomoku:update", { game });
-  io.to(`user:${game.playerWhite.id}`).emit("gomoku:update", { game });
-  io.to(`gomoku:${game.id}`).emit("gomoku:update", { game });
-  if (game.status === "finished") {
-    io.to(`gomoku:${game.id}`).emit("gomoku:end", { game, winner: game.winner });
-  }
-}
 
 export function createGomokuRouter(
   io: Server<ClientToServerEvents, ServerToClientEvents>,
@@ -62,7 +54,7 @@ export function createGomokuRouter(
 
     try {
       const game = await service.createInvite(req.user.id, parsed.data.targetUserId);
-      notifyGameUpdate(io, game);
+      emitGomokuUpdate(io, game);
       res.status(201).json({ game });
     } catch (error) {
       if (error instanceof GomokuValidationError) {
@@ -87,7 +79,7 @@ export function createGomokuRouter(
 
     try {
       const game = await service.acceptInvite(parsed.data.gameId, req.user.id);
-      notifyGameUpdate(io, game);
+      emitGomokuUpdate(io, game);
       res.json({ game });
     } catch (error) {
       if (error instanceof GomokuValidationError) {
@@ -112,7 +104,7 @@ export function createGomokuRouter(
 
     try {
       const game = await service.makeMove(parsed.data.gameId, req.user.id, parsed.data.row, parsed.data.col);
-      notifyGameUpdate(io, game);
+      emitGomokuUpdate(io, game);
       res.json({ game });
     } catch (error) {
       if (error instanceof GomokuValidationError) {

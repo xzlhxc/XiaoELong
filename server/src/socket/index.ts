@@ -13,6 +13,7 @@ import { listUsers, getUserById } from "../db/users.js";
 import { GomokuService, GomokuValidationError } from "../services/gomoku-service.js";
 import { normalizeChatContent, normalizeChatFile, normalizeChatImage } from "../utils/chat.js";
 import { verifyAccessToken } from "../utils/jwt.js";
+import { emitGomokuUpdate } from "./gomoku-events.js";
 
 const MAIN_ROOM = "room:main";
 
@@ -69,18 +70,6 @@ export async function listPresenceUsers(): Promise<PresenceUser[]> {
     isOnline: onlineSet.has(user.id),
     todayMood: moodsByUserId.get(user.id) ?? null
   }));
-}
-
-function emitGomokuUpdate(
-  io: Server<ClientToServerEvents, ServerToClientEvents>,
-  game: import("@xiaoelong/shared").GomokuGame
-): void {
-  io.to(`user:${game.playerBlack.id}`).emit("gomoku:update", { game });
-  io.to(`user:${game.playerWhite.id}`).emit("gomoku:update", { game });
-  io.to(`gomoku:${game.id}`).emit("gomoku:update", { game });
-  if (game.status === "finished") {
-    io.to(`gomoku:${game.id}`).emit("gomoku:end", { game, winner: game.winner });
-  }
 }
 
 export function setupSocket(
