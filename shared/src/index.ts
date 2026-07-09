@@ -74,12 +74,77 @@ export interface ChatFileUploadResponse {
   file: ChatFile;
 }
 
+export type DailyQuestionVisual =
+  | {
+      type: "clock";
+      data: {
+        hour: number;
+        minute: number;
+      };
+    }
+  | {
+      type: "venn2";
+      data: {
+        leftLabel: string;
+        rightLabel: string;
+        leftOnly: number;
+        both: number;
+        rightOnly: number;
+        outside?: number;
+      };
+    }
+  | {
+      type: "pathGrid";
+      data: {
+        rows: number;
+        cols: number;
+        start: [number, number];
+        end: [number, number];
+        allowedMoves: Array<"right" | "down">;
+      };
+    }
+  | {
+      type: "barChart";
+      data: {
+        title?: string;
+        items: Array<{
+          label: string;
+          value: number;
+        }>;
+      };
+    }
+  | {
+      type: "logicTable";
+      data: {
+        people: string[];
+        roles: string[];
+        marks: Array<{
+          person: string;
+          role: string;
+          value: boolean;
+        }>;
+      };
+    }
+  | {
+      type: "triangle";
+      data: {
+        points: [string, string, string];
+        equalSides?: Array<[string, string]>;
+        angles?: Array<{
+          point: string;
+          degrees: number;
+        }>;
+        unknownAngleAt?: string;
+      };
+    };
+
 export interface DailyQuestion {
   id: number;
   date: string;
   category: string;
   question: string;
   options: string[];
+  visual: DailyQuestionVisual | null;
   sourceType: "online" | "fallback" | "manual";
   sourceContext: string | null;
   createdAt: string;

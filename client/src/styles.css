@@ -1366,6 +1366,152 @@ button:disabled {
   line-height: 1.45;
 }
 
+.question-visual {
+  overflow: hidden;
+  border: 1px solid #dcebe4;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfefc 0%, #f4fbf7 100%);
+}
+
+.question-visual-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 210px;
+}
+
+.question-visual-svg text {
+  user-select: none;
+}
+
+.visual-surface,
+.visual-frame {
+  fill: #ffffff;
+  stroke: #cfe5dc;
+  stroke-width: 2;
+}
+
+.visual-guide {
+  fill: none;
+  stroke: #d7ebe3;
+  stroke-width: 2;
+  stroke-dasharray: 4 7;
+}
+
+.visual-label,
+.visual-caption {
+  fill: #4d756a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.visual-caption {
+  fill: #6f8e86;
+}
+
+.visual-number,
+.visual-value,
+.visual-point-label,
+.visual-mark {
+  fill: #173f35;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.visual-number.small {
+  font-size: 15px;
+}
+
+.visual-hand {
+  stroke: #176851;
+  stroke-linecap: round;
+}
+
+.visual-hand.minute {
+  stroke-width: 4;
+}
+
+.visual-hand.hour {
+  stroke-width: 7;
+}
+
+.visual-dot {
+  fill: #176851;
+}
+
+.visual-venn-left {
+  fill: rgba(88, 188, 164, 0.28);
+  stroke: #45aa91;
+  stroke-width: 2;
+}
+
+.visual-venn-right {
+  fill: rgba(84, 176, 211, 0.25);
+  stroke: #4aa3c6;
+  stroke-width: 2;
+}
+
+.visual-grid-line,
+.visual-axis,
+.visual-table-line {
+  stroke: #c9ded5;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.visual-start {
+  fill: #3db58e;
+}
+
+.visual-end {
+  fill: #54a9d4;
+}
+
+.visual-bar {
+  fill: #58bca4;
+}
+
+.visual-bar.tone-1 {
+  fill: #54a9d4;
+}
+
+.visual-bar.tone-2 {
+  fill: #e2b24f;
+}
+
+.visual-bar.tone-3 {
+  fill: #d98272;
+}
+
+.visual-mark.yes {
+  fill: #1d8f6f;
+}
+
+.visual-mark.no {
+  fill: #b75b4a;
+}
+
+.visual-triangle {
+  fill: rgba(88, 188, 164, 0.16);
+  stroke: #318d78;
+  stroke-width: 3;
+}
+
+.visual-equal-mark,
+.visual-unknown {
+  fill: none;
+  stroke: #b45a49;
+  stroke-linecap: round;
+  stroke-width: 3;
+}
+
+.visual-unknown {
+  fill: #b45a49;
+  stroke: none;
+  font-size: 24px;
+  font-weight: 850;
+}
+
 .question-result {
   display: grid;
   gap: 5px;

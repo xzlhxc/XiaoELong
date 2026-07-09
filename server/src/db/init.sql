@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS daily_questions (
   date DATE NOT NULL UNIQUE,
   question TEXT NOT NULL,
   options JSON NOT NULL,
+  visual_type VARCHAR(32) NULL,
+  visual_data JSON NULL,
   category VARCHAR(32) NOT NULL DEFAULT '综合',
   correct_answer_index INT NOT NULL DEFAULT 0,
   explanation TEXT NULL,
@@ -127,6 +129,26 @@ SET @add_daily_questions_category = IF(
   'SELECT 1'
 );
 PREPARE stmt FROM @add_daily_questions_category;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_daily_questions_visual_type = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'visual_type') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN visual_type VARCHAR(32) NULL AFTER options',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_visual_type;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_daily_questions_visual_data = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'visual_data') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN visual_data JSON NULL AFTER visual_type',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_visual_data;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 

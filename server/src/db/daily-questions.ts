@@ -1,4 +1,4 @@
-import type { DailyQuestion, DailyQuestionStats, DailyQuestionVoter } from "@xiaoelong/shared";
+import type { DailyQuestion, DailyQuestionStats, DailyQuestionVisual, DailyQuestionVoter } from "@xiaoelong/shared";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { pool } from "./pool.js";
 import { toIsoString } from "../utils/time.js";
@@ -15,6 +15,8 @@ interface DailyQuestionRow extends RowDataPacket {
   category: string | null;
   question: string;
   options: string | string[];
+  visual_type: DailyQuestionVisual["type"] | null;
+  visual_data: string | DailyQuestionVisual["data"] | null;
   correct_answer_index: number | null;
   explanation: string | null;
   source_type: "online" | "fallback" | "manual";
@@ -45,6 +47,7 @@ interface CreateDailyQuestionInput {
   category: string;
   question: string;
   options: string[];
+  visual: DailyQuestionVisual | null;
   correctAnswerIndex: number;
   explanation: string;
   sourceType: "online" | "fallback" | "manual";
@@ -66,6 +69,25 @@ function parseOptions(raw: string | string[]): string[] {
   }
 }
 
+function parseVisual(
+  visualType: DailyQuestionVisual["type"] | null,
+  raw: string | DailyQuestionVisual["data"] | null
+): DailyQuestionVisual | null {
+  if (!visualType || raw === null) {
+    return null;
+  }
+
+  try {
+    const data = typeof raw === "string" ? (JSON.parse(raw) as DailyQuestionVisual["data"]) : raw;
+    return {
+      type: visualType,
+      data
+    } as DailyQuestionVisual;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeCorrectAnswerIndex(raw: number | null, optionCount: number): number {
   if (raw === null || raw < 0 || raw >= optionCount) {
     return 0;
@@ -75,6 +97,7 @@ function normalizeCorrectAnswerIndex(raw: number | null, optionCount: number): n
 
 function mapDailyQuestion(row: DailyQuestionRow): DailyQuestionRecord {
   const options = parseOptions(row.options);
+  const visual = parseVisual(row.visual_type, row.visual_data);
   const explanation = row.explanation?.trim() || "";
   const questionDate = row.date instanceof Date ? toIsoString(row.date).slice(0, 10) : String(row.date).slice(0, 10);
   return {
@@ -83,6 +106,7 @@ function mapDailyQuestion(row: DailyQuestionRow): DailyQuestionRecord {
     category: row.category || "综合",
     question: row.question,
     options,
+    visual,
     correctAnswerIndex: normalizeCorrectAnswerIndex(row.correct_answer_index, options.length),
     explanation: explanation || "暂无解析。",
     hasAnswerKey: explanation.length > 0,
@@ -99,6 +123,7 @@ export function toPublicDailyQuestion(question: DailyQuestionRecord): DailyQuest
     category: question.category,
     question: question.question,
     options: question.options,
+    visual: question.visual,
     sourceType: question.sourceType,
     sourceContext: question.sourceContext,
     createdAt: question.createdAt
@@ -107,7 +132,7 @@ export function toPublicDailyQuestion(question: DailyQuestionRecord): DailyQuest
 
 export async function getDailyQuestionByDate(date: string): Promise<DailyQuestionRecord | null> {
   const [rows] = await pool.query<DailyQuestionRow[]>(
-    `SELECT id, date, category, question, options, correct_answer_index, explanation, source_type, source_context, created_at
+    `SELECT id, date, category, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context, created_at
      FROM daily_questions
      WHERE date = ?
      LIMIT 1`,
@@ -122,7 +147,7 @@ export async function getDailyQuestionByDate(date: string): Promise<DailyQuestio
 
 export async function getDailyQuestionById(id: number): Promise<DailyQuestionRecord | null> {
   const [rows] = await pool.query<DailyQuestionRow[]>(
-    `SELECT id, date, category, question, options, correct_answer_index, explanation, source_type, source_context, created_at
+    `SELECT id, date, category, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context, created_at
      FROM daily_questions
      WHERE id = ?
      LIMIT 1`,
@@ -151,13 +176,15 @@ export async function listRecentQuestionTexts(beforeDate: string, limit = 10): P
 export async function createDailyQuestion(input: CreateDailyQuestionInput): Promise<DailyQuestionRecord> {
   const [result] = await pool.execute<ResultSetHeader>(
     `INSERT INTO daily_questions
-       (date, category, question, options, correct_answer_index, explanation, source_type, source_context)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (date, category, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.date,
       input.category,
       input.question,
       JSON.stringify(input.options),
+      input.visual?.type ?? null,
+      input.visual ? JSON.stringify(input.visual.data) : null,
       input.correctAnswerIndex,
       input.explanation,
       input.sourceType,
