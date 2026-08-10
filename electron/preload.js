@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld("xiaoelongImageViewer", {
   close: () => ipcRenderer.send("desktop:image-viewer-close"),
   previous: () => ipcRenderer.send("desktop:image-viewer-previous"),
   next: () => ipcRenderer.send("desktop:image-viewer-next"),
+  ready: (requestId) => ipcRenderer.send("desktop:image-viewer-ready", { requestId }),
   onStateChange: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("desktop:image-viewer-state", listener);

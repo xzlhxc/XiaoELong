@@ -17,9 +17,11 @@ CREATE TABLE IF NOT EXISTS messages (
   file_name VARCHAR(255) NULL,
   file_mime_type VARCHAR(128) NULL,
   file_size INT NULL,
+  reply_to_message_id BIGINT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_messages_created_at (created_at),
   KEY idx_messages_user_created_at (user_id, created_at),
+  KEY idx_messages_reply_to_message_id (reply_to_message_id),
   CONSTRAINT fk_messages_user
     FOREIGN KEY (user_id) REFERENCES users(id)
     ON DELETE CASCADE
@@ -102,6 +104,36 @@ SET @add_messages_file_size = IF(
   'SELECT 1'
 );
 PREPARE stmt FROM @add_messages_file_size;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_reply_to_message_id = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'reply_to_message_id') = 0,
+  'ALTER TABLE messages ADD COLUMN reply_to_message_id BIGINT NULL AFTER file_size',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_reply_to_message_id;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_reply_to_message_index = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND INDEX_NAME = 'idx_messages_reply_to_message_id') = 0,
+  'ALTER TABLE messages ADD INDEX idx_messages_reply_to_message_id (reply_to_message_id)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_reply_to_message_index;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_reply_to_message_fk = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+   WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND CONSTRAINT_NAME = 'fk_messages_reply_to') = 0,
+  'ALTER TABLE messages ADD CONSTRAINT fk_messages_reply_to FOREIGN KEY (reply_to_message_id) REFERENCES messages(id) ON DELETE SET NULL',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_reply_to_message_fk;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 

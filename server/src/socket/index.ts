@@ -9,10 +9,15 @@ import type {
 } from "@xiaoelong/shared";
 import type { Server, Socket } from "socket.io";
 import { listDailyMoodsByUserId } from "../db/daily-moods.js";
-import { createMessage } from "../db/messages.js";
+import { createMessage, messageExists } from "../db/messages.js";
 import { listUsers, getUserById } from "../db/users.js";
 import { GomokuService, GomokuValidationError } from "../services/gomoku-service.js";
-import { normalizeChatContent, normalizeChatFile, normalizeChatImage } from "../utils/chat.js";
+import {
+  normalizeChatContent,
+  normalizeChatFile,
+  normalizeChatImage,
+  normalizeReplyToMessageId
+} from "../utils/chat.js";
 import { verifyAccessToken } from "../utils/jwt.js";
 import { emitGomokuUpdate } from "./gomoku-events.js";
 
@@ -173,11 +178,32 @@ export function setupSocket(
         return;
       }
 
+      const normalizedReplyTo = normalizeReplyToMessageId(payload?.replyToMessageId);
+      if (!normalizedReplyTo.ok) {
+        ack?.({
+          ok: false,
+          error: normalizedReplyTo.error
+        });
+        return;
+      }
+
       try {
+        if (
+          normalizedReplyTo.replyToMessageId !== null
+          && !await messageExists(normalizedReplyTo.replyToMessageId)
+        ) {
+          ack?.({
+            ok: false,
+            error: "The quoted message no longer exists."
+          });
+          return;
+        }
+
         const message = await createMessage(userId, {
           content: normalized.content,
           image,
-          file
+          file,
+          replyToMessageId: normalizedReplyTo.replyToMessageId
         });
         io.to(MAIN_ROOM).emit("chat:message", message);
         ack?.({ ok: true });

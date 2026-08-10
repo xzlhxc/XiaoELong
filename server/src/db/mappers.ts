@@ -25,6 +25,21 @@ export interface MessageWithUserRow extends RowDataPacket {
   nickname: string;
   avatar_url: string | null;
   user_created_at: Date | string;
+  reply_id: number | null;
+  reply_content: string | null;
+  reply_image_url: string | null;
+  reply_image_name: string | null;
+  reply_image_mime_type: string | null;
+  reply_image_size: number | string | null;
+  reply_file_url: string | null;
+  reply_file_name: string | null;
+  reply_file_mime_type: string | null;
+  reply_file_size: number | string | null;
+  reply_created_at: Date | string | null;
+  reply_user_id: string | null;
+  reply_user_nickname: string | null;
+  reply_user_avatar_url: string | null;
+  reply_user_created_at: Date | string | null;
 }
 
 export function mapUserRow(row: UserRow): UserProfile {
@@ -62,6 +77,39 @@ export function mapMessageWithUserRow(row: MessageWithUserRow): ChatMessage {
       nickname: row.nickname,
       avatarUrl: row.avatar_url,
       createdAt: toIsoString(row.user_created_at)
-    }
+    },
+    replyTo: row.reply_id !== null
+      && row.reply_created_at !== null
+      && row.reply_user_id !== null
+      && row.reply_user_nickname !== null
+      && row.reply_user_created_at !== null
+      ? {
+          id: row.reply_id,
+          content: row.reply_content ?? "",
+          image: row.reply_image_url
+            ? {
+                url: row.reply_image_url,
+                name: row.reply_image_name ?? "image",
+                mimeType: row.reply_image_mime_type ?? "application/octet-stream",
+                size: row.reply_image_size === null ? 0 : Number(row.reply_image_size)
+              }
+            : null,
+          file: row.reply_file_url
+            ? {
+                url: row.reply_file_url,
+                name: row.reply_file_name ?? "file",
+                mimeType: row.reply_file_mime_type ?? "application/octet-stream",
+                size: row.reply_file_size === null ? 0 : Number(row.reply_file_size)
+              }
+            : null,
+          createdAt: toIsoString(row.reply_created_at),
+          user: {
+            id: row.reply_user_id,
+            nickname: row.reply_user_nickname,
+            avatarUrl: row.reply_user_avatar_url,
+            createdAt: toIsoString(row.reply_user_created_at)
+          }
+        }
+      : null
   };
 }

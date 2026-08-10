@@ -35,13 +35,17 @@ export interface ChatFile {
   size: number;
 }
 
-export interface ChatMessage {
+export interface ChatMessageQuote {
   id: number;
   user: UserProfile;
   content: string;
   image: ChatImage | null;
   file: ChatFile | null;
   createdAt: string;
+}
+
+export interface ChatMessage extends ChatMessageQuote {
+  replyTo: ChatMessageQuote | null;
 }
 
 export interface AuthJoinResponse {
@@ -316,6 +320,7 @@ export interface ChatSendPayload {
   content?: string;
   image?: ChatImage | null;
   file?: ChatFile | null;
+  replyToMessageId?: number | null;
 }
 
 export interface ChatSendAck {

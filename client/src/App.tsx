@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type UIEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MOOD_OPTIONS,
   type ChatFile,
@@ -197,7 +197,21 @@ function applyUserUpdateToPresence(current: PresenceUser[], user: UserProfile): 
 }
 
 function applyUserUpdateToMessages(current: ChatMessage[], user: UserProfile): ChatMessage[] {
-  return current.map((message) => (message.user.id === user.id ? { ...message, user } : message));
+  return current.map((message) => {
+    const updatesAuthor = message.user.id === user.id;
+    const updatesReplyAuthor = message.replyTo?.user.id === user.id;
+    if (!updatesAuthor && !updatesReplyAuthor) {
+      return message;
+    }
+
+    return {
+      ...message,
+      user: updatesAuthor ? user : message.user,
+      replyTo: updatesReplyAuthor && message.replyTo
+        ? { ...message.replyTo, user }
+        : message.replyTo
+    };
+  });
 }
 
 function applyUserUpdateToGames(current: GomokuGame[], user: UserProfile): GomokuGame[] {
@@ -344,6 +358,7 @@ export default function App(): JSX.Element {
   const deityDataVersionRef = useRef(0);
   const pendingGomokuMoveIdsRef = useRef<Set<number>>(new Set());
   const chatScrollMemoryRef = useRef<ChatScrollMemory | null>(null);
+  const settingsScrollEndTimerRef = useRef<number | null>(null);
   const [token, setToken] = useState<string | null>(getInitialAccessToken);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
@@ -436,6 +451,25 @@ export default function App(): JSX.Element {
       window.xiaoelongDesktop?.setPanelContentExtraHeight?.(height);
     }
   }, [desktopRole]);
+
+  const handleSettingsScroll = useCallback((event: UIEvent<HTMLElement>): void => {
+    const scrollArea = event.currentTarget;
+    scrollArea.classList.add("is-scrolling");
+
+    if (settingsScrollEndTimerRef.current !== null) {
+      window.clearTimeout(settingsScrollEndTimerRef.current);
+    }
+    settingsScrollEndTimerRef.current = window.setTimeout(() => {
+      scrollArea.classList.remove("is-scrolling");
+      settingsScrollEndTimerRef.current = null;
+    }, 500);
+  }, []);
+
+  useEffect(() => () => {
+    if (settingsScrollEndTimerRef.current !== null) {
+      window.clearTimeout(settingsScrollEndTimerRef.current);
+    }
+  }, []);
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -833,6 +867,39 @@ export default function App(): JSX.Element {
   }, [profileSaved]);
 
   useEffect(() => {
+    if (!token || !currentUser || desktopRole === "auth") {
+      return;
+    }
+
+    let refreshInFlight = false;
+    const refreshMood = (): void => {
+      if (refreshInFlight) {
+        return;
+      }
+
+      refreshInFlight = true;
+      void loadTodayMood().finally(() => {
+        refreshInFlight = false;
+      });
+    };
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === "visible") {
+        refreshMood();
+      }
+    };
+
+    const timer = window.setInterval(refreshMood, 60_000);
+    window.addEventListener("online", refreshMood);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("online", refreshMood);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [token, currentUser, desktopRole, loadTodayMood]);
+
+  useEffect(() => {
     if (!token || !currentUser || desktopRole === "auth" || desktopRole === "avatar") {
       return;
     }
@@ -1013,6 +1080,7 @@ export default function App(): JSX.Element {
     content: string;
     imageFile: File | null;
     fileFile: File | null;
+    replyToMessageId: number | null;
   }): Promise<void> => {
     setSendError(null);
 
@@ -1057,7 +1125,12 @@ export default function App(): JSX.Element {
           }
         }, 5000);
 
-        socket.emit("chat:send", { content: payload.content, image, file }, (ack) => {
+        socket.emit("chat:send", {
+          content: payload.content,
+          image,
+          file,
+          replyToMessageId: payload.replyToMessageId
+        }, (ack) => {
           if (settled) {
             return;
           }
@@ -1505,7 +1578,7 @@ export default function App(): JSX.Element {
           saved={profileSaved}
           onSubmit={handleUpdateProfile}
         />
-        <header className="topbar settings-topbar">
+        <header className="topbar settings-topbar" onScroll={handleSettingsScroll}>
           <div className="panel-action-buttons" aria-label="设置操作">
             <button type="button" className="ghost-button" onClick={handleHideAllWindows}>
               隐藏小鳄龙

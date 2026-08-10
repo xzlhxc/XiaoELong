@@ -1,8 +1,15 @@
 # 小鳄龙服务器部署与更新说明
 
-当前版本：`2.0.0`
+当前版本：`2.0.1`
 
 本目录是小鳄龙 Windows 服务器部署包，适用于宝塔 Windows 面板和 MySQL 5.6。部署包已将需要使用的 MySQL `JSON` 字段改为 `TEXT`，以兼容 MySQL 5.6。
+
+## 2.0.1 更新说明
+
+- 聊天新增右键引用消息，引用关系会写入数据库，并在实时消息和历史记录中返回。
+- `messages` 表新增 `reply_to_message_id` 字段、索引和自关联外键。从旧版升级时必须按第六节第 5 步重新执行数据库初始化脚本。
+- Windows 客户端同时修复每日心情跨日刷新、图片查看器闪旧图，并优化设置面板和状态栏。
+- 服务器程序和数据库升级完成后，再上传 Windows 自动更新产物；本次不覆盖 `updates/latest-mac.json`，macOS 仍保持 `2.0.0`。
 
 ## 2.0.0 更新说明
 
@@ -235,7 +242,7 @@ $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 ```
 
 ```powershell
-Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.0.0 server" -Force
+Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.0.1 server" -Force
 ```
 
 启动计划任务：

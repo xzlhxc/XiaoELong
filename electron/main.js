@@ -38,6 +38,7 @@ const SETTINGS_PANEL_WIDTH = 320;
 const SETTINGS_PANEL_HEIGHT = 420;
 const IMAGE_VIEWER_WIDTH = 840;
 const IMAGE_VIEWER_HEIGHT = 640;
+const IMAGE_VIEWER_READY_FALLBACK_MS = 3000;
 const PANEL_GAP = 12;
 const PANEL_READY_FALLBACK_MS = 3000;
 const MAX_PANEL_CONTENT_EXTRA_HEIGHT = 300;
@@ -80,9 +81,13 @@ let avatarMoodPromptVisible = false;
 let avatarClickThrough = false;
 let imageViewerState = {
   images: [],
-  index: 0
+  index: 0,
+  requestId: 0
 };
 let imageViewerReady = false;
+let imageViewerRequestId = 0;
+let imageViewerPendingShowRequestId = 0;
+let imageViewerReadyFallbackTimer = null;
 let manualMacUpdateManifest = null;
 let manualMacUpdateCheckPromise = null;
 let updateState = {
@@ -826,8 +831,9 @@ function hideAllWindows() {
   panelRenderSession.cancel();
   clearPanelReadyFallback();
   parkPanelWindow();
+  parkImageViewerWindow();
   closeDivineSelection({ showPanel: false });
-  for (const targetWindow of [authWindow, avatarWindow, imageViewerWindow]) {
+  for (const targetWindow of [authWindow, avatarWindow]) {
     if (targetWindow && !targetWindow.isDestroyed()) {
       targetWindow.hide();
     }
@@ -1224,6 +1230,50 @@ function sendImageViewerState() {
   imageViewerWindow.webContents.send("desktop:image-viewer-state", imageViewerState);
 }
 
+function clearImageViewerReadyFallback() {
+  if (imageViewerReadyFallbackTimer) {
+    clearTimeout(imageViewerReadyFallbackTimer);
+    imageViewerReadyFallbackTimer = null;
+  }
+}
+
+function revealImageViewerWindow(requestId) {
+  if (
+    !imageViewerWindow ||
+    imageViewerWindow.isDestroyed() ||
+    requestId !== imageViewerPendingShowRequestId
+  ) {
+    return;
+  }
+
+  imageViewerPendingShowRequestId = 0;
+  clearImageViewerReadyFallback();
+  imageViewerWindow.setIgnoreMouseEvents(false);
+  imageViewerWindow.setOpacity(1);
+  imageViewerWindow.show();
+  imageViewerWindow.focus();
+}
+
+function scheduleImageViewerReadyFallback(requestId) {
+  clearImageViewerReadyFallback();
+  imageViewerReadyFallbackTimer = setTimeout(() => {
+    imageViewerReadyFallbackTimer = null;
+    revealImageViewerWindow(requestId);
+  }, IMAGE_VIEWER_READY_FALLBACK_MS);
+}
+
+function parkImageViewerWindow() {
+  imageViewerPendingShowRequestId = 0;
+  clearImageViewerReadyFallback();
+  if (!imageViewerWindow || imageViewerWindow.isDestroyed()) {
+    return;
+  }
+
+  imageViewerWindow.hide();
+  imageViewerWindow.setIgnoreMouseEvents(false);
+  imageViewerWindow.setOpacity(1);
+}
+
 function createImageViewerWindow(referenceBounds = null) {
   if (imageViewerWindow) {
     return imageViewerWindow;
@@ -1245,11 +1295,14 @@ function createImageViewerWindow(referenceBounds = null) {
   });
 
   imageViewerWindow.loadFile(path.join(__dirname, "image-viewer.html"));
+  imageViewerWindow.webContents.setBackgroundThrottling(false);
   imageViewerWindow.webContents.once("did-finish-load", () => {
     imageViewerReady = true;
     sendImageViewerState();
   });
   imageViewerWindow.on("closed", () => {
+    imageViewerPendingShowRequestId = 0;
+    clearImageViewerReadyFallback();
     imageViewerWindow = null;
     imageViewerReady = false;
   });
@@ -1272,20 +1325,25 @@ function showImageViewer(payload) {
   }
 
   const nextIndex = clamp(Number(payload?.index) || 0, 0, images.length - 1);
+  const requestId = ++imageViewerRequestId;
   imageViewerState = {
     images,
-    index: nextIndex
+    index: nextIndex,
+    requestId
   };
+  imageViewerPendingShowRequestId = requestId;
 
   const referenceWindow = panelWindow && !panelWindow.isDestroyed() ? panelWindow : avatarWindow;
   const referenceBounds = referenceWindow && !referenceWindow.isDestroyed() ? referenceWindow.getBounds() : null;
   const targetWindow = createImageViewerWindow(referenceBounds);
   targetWindow.setBounds(getCenteredBounds(IMAGE_VIEWER_WIDTH, IMAGE_VIEWER_HEIGHT, referenceBounds), false);
-  sendImageViewerState();
+  targetWindow.setIgnoreMouseEvents(true);
+  targetWindow.setOpacity(0);
   if (!targetWindow.isVisible()) {
-    targetWindow.show();
+    targetWindow.showInactive();
   }
-  targetWindow.focus();
+  sendImageViewerState();
+  scheduleImageViewerReadyFallback(requestId);
 }
 
 function showPreviousImage() {
@@ -1648,9 +1706,23 @@ ipcMain.on("desktop:image-viewer-open", (_event, payload) => {
 });
 
 ipcMain.on("desktop:image-viewer-close", () => {
-  if (imageViewerWindow && !imageViewerWindow.isDestroyed()) {
-    imageViewerWindow.hide();
+  parkImageViewerWindow();
+});
+
+ipcMain.on("desktop:image-viewer-ready", (event, payload) => {
+  if (
+    !imageViewerWindow ||
+    imageViewerWindow.isDestroyed() ||
+    event.sender !== imageViewerWindow.webContents
+  ) {
+    return;
   }
+
+  const requestId = Number(payload?.requestId);
+  if (!Number.isInteger(requestId)) {
+    return;
+  }
+  revealImageViewerWindow(requestId);
 });
 
 ipcMain.on("desktop:image-viewer-previous", () => {

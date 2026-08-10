@@ -15,6 +15,7 @@ export const StatusBar = memo(function StatusBar(props: StatusBarProps): JSX.Ele
   const [pickerOpen, setPickerOpen] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
   const lastExtraHeightRef = useRef(-1);
 
   useLayoutEffect(() => {
@@ -48,6 +49,44 @@ export const StatusBar = memo(function StatusBar(props: StatusBarProps): JSX.Ele
     reportExtraHeight();
     return () => observer.disconnect();
   }, [props.onExtraHeightChange]);
+
+  useLayoutEffect(() => {
+    const pickerElement = pickerRef.current;
+    const rootElement = rootRef.current;
+    if (!pickerOpen || !pickerElement || !rootElement) {
+      return;
+    }
+    const observedPicker: HTMLDivElement = pickerElement;
+    const observedRoot: HTMLElement = rootElement;
+
+    function keepPickerInsideStatusBar(): void {
+      observedPicker.style.setProperty("--status-mood-picker-shift-x", "0px");
+
+      const pickerRect = observedPicker.getBoundingClientRect();
+      const rootRect = observedRoot.getBoundingClientRect();
+      const minimumLeft = Math.max(8, rootRect.left);
+      const maximumRight = Math.min(window.innerWidth - 8, rootRect.right);
+      let shiftX = 0;
+
+      if (pickerRect.left < minimumLeft) {
+        shiftX = minimumLeft - pickerRect.left;
+      }
+      if (pickerRect.right + shiftX > maximumRight) {
+        shiftX += maximumRight - (pickerRect.right + shiftX);
+      }
+
+      observedPicker.style.setProperty("--status-mood-picker-shift-x", `${shiftX}px`);
+    }
+
+    keepPickerInsideStatusBar();
+    const resizeObserver = new ResizeObserver(keepPickerInsideStatusBar);
+    resizeObserver.observe(observedRoot);
+    window.addEventListener("resize", keepPickerInsideStatusBar);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", keepPickerInsideStatusBar);
+    };
+  }, [pickerOpen, props.users]);
 
   useEffect(() => {
     if (!pickerOpen) {
@@ -117,7 +156,11 @@ export const StatusBar = memo(function StatusBar(props: StatusBarProps): JSX.Ele
               ) : null}
               {isCurrentUser ? <span className="status-self">我</span> : null}
               {isCurrentUser && pickerOpen ? (
-                <div className="status-mood-picker" onClick={(event) => event.stopPropagation()}>
+                <div
+                  className="status-mood-picker"
+                  ref={pickerRef}
+                  onClick={(event) => event.stopPropagation()}
+                >
                   {props.moodOptions.map((emoji) => (
                     <button
                       type="button"

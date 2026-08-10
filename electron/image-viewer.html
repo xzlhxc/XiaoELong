@@ -124,23 +124,60 @@
     const previous = document.getElementById("previous");
     const next = document.getElementById("next");
     const close = document.getElementById("close");
+    let renderVersion = 0;
 
     function render(state) {
+      const version = ++renderVersion;
       const images = state.images || [];
       const current = images[state.index] || null;
       previous.style.display = images.length > 1 ? "inline-grid" : "none";
       next.style.display = images.length > 1 ? "inline-grid" : "none";
+      image.onload = null;
+      image.onerror = null;
+      image.style.visibility = "hidden";
+      image.removeAttribute("src");
       if (!current) {
         meta.textContent = "";
         caption.textContent = "";
-        image.removeAttribute("src");
         image.alt = "";
         return;
       }
       meta.textContent = current.userNickname || "";
       caption.textContent = current.name || "";
-      image.src = current.url;
       image.alt = current.name || "";
+
+      let settled = false;
+      const finish = (loaded) => {
+        if (settled || version !== renderVersion) {
+          return;
+        }
+        settled = true;
+        image.onload = null;
+        image.onerror = null;
+
+        const reveal = () => {
+          if (version !== renderVersion) {
+            return;
+          }
+          if (loaded) {
+            image.style.visibility = "visible";
+          }
+          window.xiaoelongImageViewer.ready(state.requestId);
+        };
+
+        if (loaded && typeof image.decode === "function") {
+          image.decode().catch(() => undefined).then(reveal);
+        } else {
+          reveal();
+        }
+      };
+
+      image.onload = () => finish(true);
+      image.onerror = () => finish(false);
+      image.src = current.url;
+      if (image.complete) {
+        finish(image.naturalWidth > 0);
+      }
     }
 
     previous.addEventListener("click", () => window.xiaoelongImageViewer.previous());

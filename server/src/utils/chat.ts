@@ -50,6 +50,10 @@ export interface InvalidMessage {
 
 export type MessageValidationResult = NormalizedMessage | InvalidMessage;
 
+export type ReplyToMessageIdValidationResult =
+  | { ok: true; replyToMessageId: number | null }
+  | InvalidMessage;
+
 export function isAllowedChatImageMimeType(value: string): boolean {
   return (ALLOWED_CHAT_IMAGE_MIME_TYPES as readonly string[]).includes(value);
 }
@@ -90,6 +94,27 @@ export function normalizeChatContent(input: unknown, options: { allowEmpty?: boo
   return {
     ok: true,
     content: sanitized
+  };
+}
+
+export function normalizeReplyToMessageId(input: unknown): ReplyToMessageIdValidationResult {
+  if (input === undefined || input === null) {
+    return {
+      ok: true,
+      replyToMessageId: null
+    };
+  }
+
+  if (typeof input !== "number" || !Number.isSafeInteger(input) || input <= 0) {
+    return {
+      ok: false,
+      error: "Invalid quoted message."
+    };
+  }
+
+  return {
+    ok: true,
+    replyToMessageId: input
   };
 }
 

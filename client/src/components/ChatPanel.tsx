@@ -31,7 +31,12 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   sendError: string | null;
   scrollMemoryRef: MutableRefObject<ChatScrollMemory | null>;
-  onSendMessage: (payload: { content: string; imageFile: File | null; fileFile: File | null }) => Promise<void>;
+  onSendMessage: (payload: {
+    content: string;
+    imageFile: File | null;
+    fileFile: File | null;
+    replyToMessageId: number | null;
+  }) => Promise<void>;
 }
 
 const ALLOWED_CHAT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -127,6 +132,20 @@ function hasFiles(event: DragEvent<HTMLElement>): boolean {
   return Array.from(event.dataTransfer.types).includes("Files");
 }
 
+function getMessagePreview(message: Pick<ChatMessage, "content" | "image" | "file">): string {
+  const text = message.content.trim();
+  if (text) {
+    return text;
+  }
+  if (message.image) {
+    return `[图片] ${message.image.name}`;
+  }
+  if (message.file) {
+    return `[文件] ${message.file.name}`;
+  }
+  return "消息";
+}
+
 export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Element {
   const [content, setContent] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -138,8 +157,12 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
   const [dragDepth, setDragDepth] = useState(0);
   const [hiddenUnreadCount, setHiddenUnreadCount] = useState(0);
   const [liveNewMessageCount, setLiveNewMessageCount] = useState(0);
+  const [replyToMessageId, setReplyToMessageId] = useState<number | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composeInputRef = useRef<HTMLInputElement | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
   const isAtBottomRef = useRef(true);
   const lastMessageIdRef = useRef<number | null>(null);
   const firstUnreadMessageIdRef = useRef<number | null>(null);
@@ -160,6 +183,14 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
   );
 
   const renderedMessages = useMemo(() => props.messages, [props.messages]);
+  const replyToMessage = useMemo(
+    () => renderedMessages.find((message) => message.id === replyToMessageId) ?? null,
+    [renderedMessages, replyToMessageId]
+  );
+  const renderedMessageIds = useMemo(
+    () => new Set(renderedMessages.map((message) => message.id)),
+    [renderedMessages]
+  );
   const renderedMessagesRef = useRef(renderedMessages);
   renderedMessagesRef.current = renderedMessages;
   const imageMessages = useMemo(
@@ -192,6 +223,18 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
       URL.revokeObjectURL(url);
     };
   }, [imageFile]);
+
+  useEffect(() => {
+    if (replyToMessageId !== null && !replyToMessage) {
+      setReplyToMessageId(null);
+    }
+  }, [replyToMessageId, replyToMessage]);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current !== null) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+  }, []);
 
   function getMessageElement(messageId: number): HTMLElement | null {
     return listRef.current?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`) ?? null;
@@ -350,6 +393,38 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
     });
     setLiveNewMessageState(null, 0);
     window.requestAnimationFrame(captureScrollMemory);
+  }
+
+  function beginReply(messageId: number): void {
+    setReplyToMessageId(messageId);
+    window.requestAnimationFrame(() => {
+      composeInputRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function scrollToQuotedMessage(messageId: number): void {
+    const list = listRef.current;
+    const messageElement = getMessageElement(messageId);
+    if (!list || !messageElement) {
+      return;
+    }
+
+    const listBounds = list.getBoundingClientRect();
+    const targetTop = list.scrollTop + messageElement.getBoundingClientRect().top - listBounds.top
+      - Math.max(8, (list.clientHeight - messageElement.offsetHeight) / 2);
+    list.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: "smooth"
+    });
+
+    setHighlightedMessageId(messageId);
+    if (highlightTimerRef.current !== null) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedMessageId(null);
+      highlightTimerRef.current = null;
+    }, 1600);
   }
 
   function updateBottomState(): void {
@@ -711,7 +786,12 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
     selectAttachment(selectedFile);
   }
 
-  async function sendMessage(nextContent: string, nextImageFile: File | null, nextFileFile: File | null): Promise<void> {
+  async function sendMessage(
+    nextContent: string,
+    nextImageFile: File | null,
+    nextFileFile: File | null,
+    nextReplyToMessageId: number | null
+  ): Promise<void> {
     if (sending || (!nextContent.trim() && !nextImageFile && !nextFileFile)) {
       return;
     }
@@ -721,9 +801,11 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
       await props.onSendMessage({
         content: nextContent,
         imageFile: nextImageFile,
-        fileFile: nextFileFile
+        fileFile: nextFileFile,
+        replyToMessageId: nextReplyToMessageId
       });
       setContent("");
+      setReplyToMessageId((current) => current === nextReplyToMessageId ? null : current);
       clearSelectedAttachment();
     } catch {
       // Keep input content for retry when send fails.
@@ -734,7 +816,7 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    await sendMessage(content, imageFile, fileFile);
+    await sendMessage(content, imageFile, fileFile, replyToMessageId);
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLInputElement>): Promise<void> {
@@ -756,7 +838,7 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
     }
 
     setAttachmentError(null);
-    await sendMessage(content, normalizedImage, null);
+    await sendMessage(content, normalizedImage, null, replyToMessageId);
   }
 
   function handleDragEnter(event: DragEvent<HTMLElement>): void {
@@ -827,11 +909,18 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
       <div className="chat-list" ref={listRef} onScroll={updateBottomState}>
         {renderedMessages.map((message) => {
           const isMine = message.user.id === props.currentUserId;
+          const replyTo = message.replyTo;
+          const isReplyTargetVisible = replyTo ? renderedMessageIds.has(replyTo.id) : false;
           return (
             <article
-              className={`chat-item ${isMine ? "mine" : ""}`}
+              className={`chat-item ${isMine ? "mine" : ""} ${replyToMessageId === message.id ? "reply-selected" : ""} ${highlightedMessageId === message.id ? "quoted-target" : ""}`}
               key={message.id}
               data-message-id={message.id}
+              title="右键引用此消息"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                beginReply(message.id);
+              }}
             >
               <UserAvatar user={message.user} />
               <div className="bubble">
@@ -839,6 +928,18 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
                   <strong>{message.user.nickname}</strong>
                   <time dateTime={message.createdAt}>{formatChatTimestamp(message.createdAt)}</time>
                 </header>
+                {replyTo ? (
+                  <button
+                    type="button"
+                    className="chat-message-quote"
+                    disabled={!isReplyTargetVisible}
+                    title={isReplyTargetVisible ? "跳到原消息" : "原消息不在当前聊天记录中"}
+                    onClick={() => scrollToQuotedMessage(replyTo.id)}
+                  >
+                    <strong>{replyTo.user.nickname}</strong>
+                    <span>{getMessagePreview(replyTo)}</span>
+                  </button>
+                ) : null}
                 {message.image ? (
                   <button
                     type="button"
@@ -885,6 +986,25 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
           </button>
         ) : null}
 
+        {replyToMessage ? (
+          <div className="chat-reply-preview">
+            <span className="chat-reply-preview-content">
+              <strong>引用 {replyToMessage.user.nickname}</strong>
+              <small>{getMessagePreview(replyToMessage)}</small>
+            </span>
+            <button
+              type="button"
+              className="chat-reply-cancel"
+              aria-label="取消引用"
+              title="取消引用"
+              disabled={sending}
+              onClick={() => setReplyToMessageId(null)}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+
         {imagePreviewUrl || fileFile ? (
           <div className={`chat-attachment-preview ${fileFile ? "file" : "image"}`}>
             {imagePreviewUrl ? <img src={imagePreviewUrl} alt={imageFile?.name ?? ""} /> : null}
@@ -901,6 +1021,7 @@ export const ChatPanel = memo(function ChatPanel(props: ChatPanelProps): JSX.Ele
 
         <form onSubmit={handleSubmit} className="chat-form">
           <input
+            ref={composeInputRef}
             type="text"
             placeholder="写点什么..."
             value={content}
