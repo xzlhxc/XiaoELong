@@ -14,7 +14,7 @@ XiaoELong（小鳄龙之家）是一个面向固定小群使用的 Windows/macOS
 |------|---------|
 | 桌面壳 | Electron 43 |
 | 前端 | React 18 + TypeScript 5 + Vite 5 |
-| 后端 | Node.js + Express 4 + Socket.io 4 |
+| 后端 | Node.js 22.23.1 + Express 4 + Socket.io 4 |
 | 数据库 | MySQL 8.0 |
 | AI 集成 | DeepSeek API（每日一题生成） |
 | 共享契约 | `@xiaoelong/shared`（npm workspace 内部包） |
@@ -131,8 +131,8 @@ XiaoELong/
 │   └── create-mac-update-manifest.mjs # macOS 更新清单生成
 │
 ├── deploy/                          # 服务器部署包
-│   └── server/                      #   发布配置源（README / package.json / 生产配置）
-│       └── XiaoELong-server-<版本>.zip #   打包产物（脚本生成，gitignore）
+│   ├── server/                      #   发布配置源（README / package.json / 生产配置）
+│   └── XiaoELong-server-<版本>.zip  #   打包产物（脚本生成，gitignore）
 ├── docs/                            # 正式开发文档
 │   └── assets/                      #   设计参考图
 ├── docker-compose.yml               # 本地 MySQL 开发环境
@@ -550,10 +550,12 @@ POST /api/daily-question/answer { questionId, answerIndex }
 
 ```
 npm run build             → shared → server → client（Vite）
-npm run server:deploy     → 构建 shared+server 并打包 deploy/XiaoELong-server-<版本>.zip（服务器部署包）
+npm run server:deploy     → 定向清理并构建 shared+server，再打包 deploy/XiaoELong-server-<版本>.zip
 npm run electron:dist     → Windows NSIS 安装包
 npm run electron:dist:mac → macOS DMG + ZIP（universal）
 ```
+
+`npm run clean` 只清理源码构建产物、Electron `release` 和本地构建缓存，不删除 `deploy/` 下已有的服务器 ZIP。`server:deploy` 在 Windows 使用 PowerShell/.NET，在 macOS/Linux 使用 `zip`；新包先写入同目录临时文件，成功后才替换正式包。
 
 ### 部署架构
 
@@ -561,7 +563,7 @@ npm run electron:dist:mac → macOS DMG + ZIP（universal）
 用户电脑                          远程服务器 (43.139.223.204)
 ┌──────────────────┐             ┌──────────────────────────┐
 │ Electron 客户端   │             │ Node.js 服务 (port 3001)  │
-│ (内置 server 可选) │── HTTPS ──→│ - Express REST API       │
+│ (内置 server 可选) │── HTTP* ───→│ - Express REST API       │
 │                  │             │ - Socket.io              │
 │ 自动更新检查 ─────┼────────────→│ - /updates/ 静态目录     │
 │                  │             │   (latest.yml, .exe)     │
@@ -569,6 +571,8 @@ npm run electron:dist:mac → macOS DMG + ZIP（universal）
                                  │ MySQL 8.0                │
                                  └──────────────────────────┘
 ```
+
+\* 当前公网域名尚未备案，生产环境暂时使用 HTTP；这是已知并接受的部署风险，待备案与可信域名具备后再迁移 HTTPS。
 
 - 桌面客户端可选内嵌后端服务（`XIAOELONG_EMBEDDED_SERVER=1`）
 - Windows 使用 electron-updater 自动更新（generic provider）

@@ -1,15 +1,22 @@
 # 小鳄龙服务器部署与更新说明
 
-当前版本：`2.0.1`
+当前版本：`2.1.0`
 
 本目录是小鳄龙 Windows 服务器部署包，适用于宝塔 Windows 面板和 MySQL 5.6。部署包已将需要使用的 MySQL `JSON` 字段改为 `TEXT`，以兼容 MySQL 5.6。
+
+## 2.1.0 更新说明
+
+- 前端完成 Context + 三层组件架构重构，并补充前端测试和项目文档。
+- Electron 升级到 `43.3.0`，Windows 与 macOS 客户端发布版本统一为 `2.1.0`。
+- 服务器部署包改由仓库根目录的 `npm run server:deploy` 从最新源码构建和组装，不再维护重复的源码快照。
+- 本版本相对 `2.0.1` 没有新增后端接口或数据库结构变更；仍可按第六节的标准更新步骤覆盖程序并执行初始化检查。
 
 ## 2.0.1 更新说明
 
 - 聊天新增右键引用消息，引用关系会写入数据库，并在实时消息和历史记录中返回。
 - `messages` 表新增 `reply_to_message_id` 字段、索引和自关联外键。从旧版升级时必须按第六节第 5 步重新执行数据库初始化脚本。
 - Windows 客户端同时修复每日心情跨日刷新、图片查看器闪旧图，并优化设置面板和状态栏。
-- 服务器程序和数据库升级完成后，再上传 Windows 自动更新产物；本次不覆盖 `updates/latest-mac.json`，macOS 仍保持 `2.0.0`。
+- 服务器程序和数据库升级完成后，再上传 Windows 自动更新产物；`2.0.1` 当次发布未覆盖 `updates/latest-mac.json`，macOS 当时保持 `2.0.0`。
 
 ## 2.0.0 更新说明
 
@@ -49,7 +56,23 @@ C:\BtSoft\nodejs\v22.23.1\node.exe
 C:\BtSoft\nodejs\v22.23.1\npm.cmd
 ```
 
-如果以后在宝塔中更换了 Node.js 版本，需要把本文命令和计划任务中的 `v22.23.1` 改成实际版本目录。
+项目开发、打包和服务器运行统一使用 Node.js `22.23.1`，允许范围为 `>=22.22.2 <23`。如果宝塔中的 Node.js 路径不同，需要先确认版本仍在该范围内，再把本文命令和计划任务中的绝对路径改成实际目录。
+
+## 生成服务器部署包（仓库维护者）
+
+在仓库根目录使用 Node.js `22.23.1` 执行：
+
+```powershell
+npm.cmd run server:deploy
+```
+
+命令会先只清理 `server/dist` 和 `shared/dist`，重新构建后生成：
+
+```text
+deploy\XiaoELong-server-2.1.0.zip
+```
+
+Windows 使用系统自带的 PowerShell/.NET 完成压缩，不需要安装额外的 `zip` 工具；macOS/Linux 需要系统提供 `zip` 命令。脚本先生成同目录临时 ZIP，成功后才替换正式 ZIP，失败时保留上一份正式包。常规 `npm run clean` 不会删除 `deploy` 下已有的部署 ZIP。
 
 ## 一、首次部署前的准备
 
@@ -242,7 +265,7 @@ $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 ```
 
 ```powershell
-Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.0.1 server" -Force
+Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.1.0 server" -Force
 ```
 
 启动计划任务：
@@ -434,7 +457,7 @@ XiaoELong Setup x.y.z.exe
 
 `latest.yml` 和 `blockmap` 只供自动更新服务使用，不需要发送给普通用户。客户端只会更新到比当前版本更高的版本，因此不能用同一个版本号验证自动更新。
 
-### 2. Mac 检查更新并下载 DMG
+### 2. macOS 2.1.0 检查更新并下载 DMG
 
 Mac 版从 `1.3.2` 开始读取服务器上的：
 
@@ -444,11 +467,11 @@ C:\wwwroot\server\updates\latest-mac.json
 
 发布顺序如下：
 
-1. 在 GitHub 创建标签为 `v2.0.0` 的 Release，并上传 Actions 产物中的 `XiaoELong-2.0.0-mac-universal.dmg`。
+1. 在 GitHub 创建标签为 `v2.1.0` 的 Release，并上传 Actions 产物中的 `XiaoELong-2.1.0-mac-universal.dmg`。
 2. 在浏览器中确认下面的 GitHub HTTPS 地址能开始下载，并核对 DMG 的大小与 `SHA256-mac.txt`：
 
 ```text
-https://github.com/sheephjc/XiaoELong/releases/download/v2.0.0/XiaoELong-2.0.0-mac-universal.dmg
+https://github.com/sheephjc/XiaoELong/releases/download/v2.1.0/XiaoELong-2.1.0-mac-universal.dmg
 ```
 
 3. 最后把同一次 Actions 产物中的 `latest-mac.json` 上传到服务器的 `updates` 目录，覆盖旧清单。
@@ -460,7 +483,7 @@ http://43.139.223.204:3001/updates/latest-mac.json
 
 Mac 客户端只从清单读取版本和发布校验信息，实际打开的下载地址由客户端固定构造为本项目的 GitHub Release HTTPS 地址，清单不能将用户重定向到其他站点。`latest-mac.yml` 和 Mac ZIP 不需要上传到服务器。
 
-静态清单替换后通常不需要重启后端。已经安装 `1.3.2` 或更高版本的用户会看到 `2.0.0` 更新提示；`1.3.1` 没有这段逻辑，需要直接发送 `2.0.0` DMG。
+静态清单替换后通常不需要重启后端。已经安装 `1.3.2` 或更高版本的用户会看到 `2.1.0` 更新提示；`1.3.1` 没有这段逻辑，需要直接发送 `2.1.0` DMG。
 
 Mac 用户下载后需要完全退出旧版 XiaoELong，打开 DMG，把应用拖入“应用程序”并选择替换。未签名测试版首次打开时，可能还需在 Finder 中右键选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。若用户无法访问 GitHub，可以直接把 DMG 文件发给他。
 

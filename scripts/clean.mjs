@@ -1,8 +1,8 @@
-import { readdir, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
-const targets = [
+const defaultTargets = [
   "client/dist",
   "server/dist",
   "shared/dist",
@@ -11,6 +11,14 @@ const targets = [
   "client/vite.config.d.ts",
   "client/tsconfig.node.tsbuildinfo"
 ];
+const serverOnlyTargets = ["server/dist", "shared/dist"];
+const argumentsList = process.argv.slice(2);
+
+if (argumentsList.length > 1 || (argumentsList[0] && argumentsList[0] !== "--server-only")) {
+  throw new Error("Usage: node scripts/clean.mjs [--server-only]");
+}
+
+const targets = argumentsList[0] === "--server-only" ? serverOnlyTargets : defaultTargets;
 
 await Promise.all(
   targets.map((target) =>
@@ -22,23 +30,3 @@ await Promise.all(
     })
   )
 );
-
-// 清理服务器部署包 zip（文件名带版本号，遍历 deploy/ 下所有 *.zip）
-const deployDir = path.join(root, "deploy");
-try {
-  const entries = await readdir(deployDir);
-  await Promise.all(
-    entries
-      .filter((name) => name.endsWith(".zip"))
-      .map((name) =>
-        rm(path.join(deployDir, name), {
-          force: true,
-          maxRetries: 5,
-          recursive: true,
-          retryDelay: 200
-        })
-      )
-  );
-} catch {
-  // deploy/ 目录不存在时忽略
-}

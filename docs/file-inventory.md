@@ -26,6 +26,7 @@ XiaoELong/
 ├── server/                               # Express + Socket.io 后端
 ├── shared/                               # 前后端共享类型契约
 ├── docker-compose.yml                    # 本地 MySQL 容器
+├── .nvmrc                                # Node.js 22.23.1 版本固定
 ├── package.json                          # monorepo 根配置 + electron-builder
 ├── package-lock.json                     # 依赖锁文件
 └── README.md                             # 项目主文档
@@ -41,6 +42,7 @@ XiaoELong/
 |------|------|------|
 | `package.json` | monorepo 根配置，定义 3 个 workspace（client/server/shared）、所有 npm scripts、electron-builder 打包配置 | 核心文件，不可删 |
 | `package-lock.json` | npm 依赖版本锁定文件 | 不可删 |
+| `.nvmrc` | 本地开发与 CI 使用的 Node.js 版本，固定为 22.23.1 | 不可删 |
 | `docker-compose.yml` | 本地开发用 MySQL 8.0 容器，端口 3306，数据库/用户名/密码均为 `xiaoelong` | 不可删 |
 | `.gitignore` | 排除 node_modules/、dist/、release/、.env 等 | 不可删 |
 
@@ -54,7 +56,7 @@ XiaoELong/
 
 | 目录 | 作用 | 备注 |
 |------|------|------|
-| `.github/workflows/` | GitHub Actions CI：`build-macos.yml`（macOS universal 构建工作流，手动触发） | 不可删 |
+| `.github/workflows/` | GitHub Actions CI：`build-macos.yml`（Node.js 22.23.1、macOS universal 构建，手动触发） | 不可删 |
 
 ---
 
@@ -283,9 +285,8 @@ XiaoELong/
 | 目录 | 作用 |
 |------|------|
 | `server/uploads/avatars/` | 用户头像上传目录（含 `.gitkeep` 保留目录结构） |
-| `server/avatars/` | 空目录（可能是旧的头像路径遗留） |
-| `server/chat-images/` | 聊天图片上传目录（含 `.gitkeep`） |
-| `server/chat-files/` | 聊天文件上传目录 |
+| `server/uploads/chat-images/` | 聊天图片运行时目录，由服务启动时自动创建 |
+| `server/uploads/chat-files/` | 聊天文件运行时目录，由服务启动时自动创建 |
 
 ---
 
@@ -297,7 +298,7 @@ XiaoELong/
 | `electron/preload.js` | ~102 | 预加载脚本：通过 `contextBridge.exposeInMainWorld` 暴露 `window.xiaoelongDesktop` API（窗口管理、会话、设置、更新、拖拽） |
 | `electron/render-session.js` | ~50 | 面板渲染会话管理：stage（透明不可交互）→ reveal（不透明可交互）两阶段防闪烁，3 秒超时兜底 |
 | `electron/manual-mac-updater.js` | ~199 | macOS 手动更新逻辑：获取 `latest-mac.json`、版本比较、语义化版本解析、安全校验（大小限制 64KB、格式校验） |
-| `electron/image-viewer.html` | ~50 | 独立图片查看器页面：加载 chat-images 目录下的图片，支持缩放和拖拽 |
+| `electron/image-viewer.html` | ~430 | 独立图片查看器页面：完整适配图片，支持滚轮/键盘缩放、拖拽、导航和防旧图闪现 |
 | `electron/assets/xiaoelong-tray-icon.png` | — | 系统托盘图标（macOS，16×16 PNG） |
 | `electron/assets/xiaoelong-tray-icon.ico` | — | 系统托盘图标（Windows ICO） |
 
@@ -326,8 +327,8 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `scripts/clean.mjs` | ~30 | 清理构建产物：删除 client/dist、server/dist、shared/dist、release/、*.tsbuildinfo、服务器部署 zip |
-| `scripts/build-server-deploy.mjs` | ~70 | 服务器部署包打包：组装 server/shared 的 dist 与依赖清单，生成 `deploy/XiaoELong-server-<版本>.zip`（由根 `npm run server:deploy` 调用） |
+| `scripts/clean.mjs` | ~30 | 清理构建产物；支持 `--server-only` 定向清理 server/shared，始终保留 deploy 下的 ZIP |
+| `scripts/build-server-deploy.mjs` | ~130 | 服务器部署包打包：Windows 使用 PowerShell/.NET，macOS/Linux 使用 `zip`；临时包成功后才替换正式包 |
 | `scripts/dev-electron.mjs` | ~80 | 开发环境 Electron 启动器：设置 ELECTRON_START_URL、XIAOELONG_EMBEDDED_SERVER、独立用户数据目录 |
 | `scripts/create-mac-update-manifest.mjs` | ~60 | macOS 更新清单生成：读取 release 目录中的 DMG，生成 latest-mac.json（version、fileName、size、sha256、releasedAt） |
 
@@ -341,7 +342,7 @@ XiaoELong/
 
 ## 七、deploy/ — 服务器部署包（发布配置 + 脚本产物）
 
-`deploy/server/` 是宝塔 Windows 面板服务器部署包的**发布配置源**。构建产物（dist、server/shared 的 package.json 副本、updates 目录）由 `npm run server:deploy` 脚本在临时目录组装并打包成 `deploy/XiaoELong-server-<版本>.zip`（已 gitignore），**git 中不提交源码快照**。zip 上传到服务器解压后即 `C:\wwwroot\server` 部署根。
+`deploy/server/` 是宝塔 Windows 面板服务器部署包的**发布配置源**。`npm run server:deploy` 会先定向清理并重建 server/shared，再在临时目录组装 dist、package.json 副本和 updates 目录，最后打包成 `deploy/XiaoELong-server-<版本>.zip`（已 gitignore），**git 中不提交源码快照**。新 ZIP 成功生成后才替换旧包，常规 `npm run clean` 不会删除它。zip 上传到服务器解压后即 `C:\wwwroot\server` 部署根。
 
 git 中只保留发布专用文件：
 
@@ -349,7 +350,7 @@ git 中只保留发布专用文件：
 |------|------|
 | `deploy/server/package.json` | 部署根 package.json（与根 package.json 不同，仅声明 server/shared 两个 workspace） |
 | `deploy/server/package-lock.json` | 部署依赖锁文件 |
-| `deploy/server/README-SERVER.md` | 服务器部署与更新说明（538 行）：宝塔 Windows 面板部署、环境变量、计划任务开机自启、故障排查 |
+| `deploy/server/README-SERVER.md` | 服务器部署与更新说明：部署包生成、宝塔 Windows 面板部署、环境变量、计划任务开机自启、故障排查 |
 | `deploy/server/server/.env.example` | **生产环境变量模板**（`NODE_ENV=production`、公网地址、Windows 路径 `C:\wwwroot\server\`），与开发版不同 |
 | `deploy/server/server/src/db/init.sql` | **MySQL 5.6 兼容版建表脚本**（4 处 `JSON`→`TEXT`，与源码版不同）。保留发布版，脚本不覆盖 |
 
@@ -376,9 +377,9 @@ git 中只保留发布专用文件：
 | 根目录 PNG ×2 | ✅ 移入 `docs/assets/` |
 | client/src 顶层模块 | ✅ 分类到 `config/`、`services/`、`utils/`、`styles/` |
 | deploy 源码快照 | ✅ 移除，改由 `npm run server:deploy` 脚本从源码组装 |
-| 构建产物（dist、tsbuildinfo、部署 zip） | ✅ 清理并纳入 `npm run clean`，git 不跟踪 |
+| 构建产物（dist、tsbuildinfo） | ✅ 纳入 `npm run clean`，git 不跟踪 |
+| 服务器部署 ZIP | ✅ 由 `npm run server:deploy` 成功生成后替换；`npm run clean` 保留，git 不跟踪 |
 | 根 `updates/`（空目录） | 保留（git 不跟踪，部署包打包时由脚本创建） |
-| `server/avatars/`（空目录） | 遗留空目录，可删除 |
 | `.DS_Store` | 已 gitignore，磁盘残留无影响 |
 | `client/src/assets/xiaoelong-mascot-test.png` | 测试资源，确认无依赖后可删除 |
 

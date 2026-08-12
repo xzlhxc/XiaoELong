@@ -13,6 +13,8 @@
 - 新增前端测试
 - Electron 依赖升级
 - 新增开发文档
+- 修复账号切换时的异步状态串号，并完善 Windows 服务器部署脚本
+- 恢复“汇聚星轨”、五子棋交叉点落子及长图完整查看/缩放
 
 （详细见 [版本历史](CHANGELOG.md) ）
 
@@ -40,9 +42,11 @@
 .
 ├── client/              # React 前端
 │   ├── src/
-│   │   ├── components/  # Avatar、聊天、状态栏、每日问题、五子棋、设置
-│   │   ├── api.ts       # REST 客户端
-│   │   ├── socket.ts    # Socket.io 客户端
+│   │   ├── components/  # atoms、pages、panels 三层 UI 组件
+│   │   ├── contexts/    # Auth、Chat、Daily、Deity、Desktop、Gomoku 状态
+│   │   ├── services/    # REST 与 Socket.io 客户端
+│   │   ├── styles/      # 全局与神选样式
+│   │   ├── AppProviders.tsx
 │   │   └── App.tsx
 ├── electron/            # Electron 主进程、preload、图片查看器页面
 ├── server/              # Express、Socket、数据库访问和业务服务
@@ -53,6 +57,8 @@
 ```
 
 ## 环境准备
+
+项目开发、测试与发布统一使用 Node.js `22.23.1`。根目录 `.nvmrc` 固定该版本，`package.json` 接受的范围为 `>=22.22.2 <23`。
 
 根目录安装依赖：
 
@@ -159,6 +165,8 @@ npm.cmd run deepseek:check
 npm.cmd run clean
 ```
 
+`clean` 会删除 client/server/shared 的 `dist`、Electron `release` 和本地构建缓存，但不会删除 `deploy/` 下已经生成的服务器部署 ZIP。
+
 构建 shared、server、client。默认构建使用公网服务地址：
 
 ```powershell
@@ -176,6 +184,14 @@ npm.cmd run build:local
 ```powershell
 npm.cmd run build:cloud
 ```
+
+生成服务器部署包：
+
+```powershell
+npm.cmd run server:deploy
+```
+
+该命令会先定向清理 `server/dist` 和 `shared/dist`，重新构建后生成 `deploy/XiaoELong-server-2.1.0.zip`。Windows 使用系统自带的 PowerShell/.NET 压缩，无需额外安装 `zip`；macOS/Linux 需要系统提供 `zip` 命令。脚本会先生成同目录临时 ZIP，成功后才替换正式包，失败时保留上一份正式包。
 
 生成 Electron unpacked 目录包，适合本机快速测试：
 
@@ -197,7 +213,7 @@ npm.cmd run electron:dist
 npm run electron:dist:mac
 ```
 
-该命令会在 `release/` 下生成 `XiaoELong-2.1.0-mac-universal.dmg`、`XiaoELong-2.1.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.1.0-mac-universal` 的 Actions 产物。
+该命令会在 `release/` 下生成 `XiaoELong-2.1.0-mac-universal.dmg`、`XiaoELong-2.1.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.1.0-mac-universal` 的 Actions 产物。
 
 下载并解压 Actions 产物后，可在 macOS 终端校验安装包：
 
