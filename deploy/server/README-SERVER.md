@@ -494,6 +494,25 @@ Get-ScheduledTaskInfo -TaskName "XiaoELongServer" | Format-List *
 
 常见原因包括 Node.js 绝对路径错误、工作目录错误、`.env` 缺失或数据库连接失败。可以先按第四节以前台方式启动，以便直接看到具体报错。
 
+### 在终端查看当前每日题目来源
+
+在宝塔终端或服务器 PowerShell 中逐行执行：
+
+```powershell
+$MysqlExe = (Get-ChildItem -LiteralPath 'C:\BtSoft\mysql' -Filter 'mysql.exe' -File -Recurse | Select-Object -First 1).FullName
+
+$MysqlExe
+
+$Sql = 'SELECT `date`, source_type, source_context, created_at FROM daily_questions ORDER BY `date` DESC LIMIT 1;'
+
+$DbLine = Get-Content -LiteralPath 'C:\wwwroot\server\server\.env' | Where-Object { $_ -match '^\s*DB_PASSWORD\s*=' } | Select-Object -First 1
+
+if (-not $DbLine) { throw 'DB_PASSWORD not found in .env' }
+$env:MYSQL_PWD = (($DbLine -replace '^\s*DB_PASSWORD\s*=\s*', '').Trim()).Trim('"').Trim("'")
+
+try { & "$MysqlExe" -h 127.0.0.1 -P 3306 -u root -D XiaoELong -e $Sql } finally { Remove-Item Env:MYSQL_PWD -ErrorAction SilentlyContinue; $DbLine = $null }
+```
+
 ### 每日题目显示备用题库
 
 如果日志中出现以下内容，表示服务正常启动，但当天题目没有由 DeepSeek 成功生成：
