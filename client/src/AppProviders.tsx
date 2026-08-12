@@ -7,7 +7,7 @@ import { DailyProvider } from "./contexts/DailyContext";
 import { DeityProvider } from "./contexts/DeityContext";
 import { GomokuProvider } from "./contexts/GomokuContext";
 
-// Chat / Daily / Deity / Gomoku 互相独立，平级组合
+// Daily 位于 Chat 内部，以便 REST 保存心情后即时同步在线成员状态；其余领域通过 Auth 资料状态协同。
 const FeatureProviders: React.ComponentType<{ children: React.ReactNode }>[] = [
   ChatProvider,
   DailyProvider,

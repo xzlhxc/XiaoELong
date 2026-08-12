@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
 import {
   MOOD_OPTIONS,
   type DailyMoodTodayResponse,
@@ -12,6 +12,7 @@ import {
 import { getTodayMood, getTodayQuestion, setTodayMood, submitTodayAnswer } from "../services/api";
 import { getOrCreateSocket } from "../services/socket";
 import { useAuth } from "./AuthContext";
+import { useChat } from "./ChatContext";
 import { useDesktop } from "./DesktopContext";
 
 // ============================================================
@@ -151,7 +152,33 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(dailyReducer, null, createInitialState);
 
   const { token, currentUserId, currentUser } = useAuth();
+  const { updateMoodForUser } = useChat();
   const { desktopRole } = useDesktop();
+
+  // 每次登录身份变化都推进会话代际。旧账号发出的异步请求即使晚到，
+  // 也不能再把每日一题或心情数据写回当前账号。
+  const sessionEpochRef = useRef(0);
+  const dailyLoadVersionRef = useRef(0);
+  const dailyLoadingOwnerRef = useRef<number | null>(null);
+  const moodLoadVersionRef = useRef(0);
+
+  const invalidateSession = useCallback((): void => {
+    sessionEpochRef.current += 1;
+    dailyLoadVersionRef.current += 1;
+    dailyLoadingOwnerRef.current = null;
+    moodLoadVersionRef.current += 1;
+  }, []);
+
+  const isCurrentSession = useCallback((epoch: number): boolean => (
+    sessionEpochRef.current === epoch
+  ), []);
+
+  useLayoutEffect(() => {
+    invalidateSession();
+    if (!token || !currentUserId) {
+      dispatch({ type: "CLEAR" });
+    }
+  }, [token, currentUserId, invalidateSession]);
 
   // ---- 数据加载 ----
 
@@ -160,37 +187,58 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const sessionEpoch = sessionEpochRef.current;
+    const loadVersion = ++dailyLoadVersionRef.current;
     const silent = options?.silent ?? false;
     if (!silent) {
+      dailyLoadingOwnerRef.current = loadVersion;
       dispatch({ type: "SET_DAILY_LOADING", payload: true });
       dispatch({ type: "SET_DAILY_ERROR", payload: null });
+    } else if (dailyLoadingOwnerRef.current !== null) {
+      // 静默刷新若成为最新请求，接管已有加载态，避免较旧请求无法收尾后卡住 spinner。
+      dailyLoadingOwnerRef.current = loadVersion;
     }
     try {
       const today = await getTodayQuestion(token);
+      if (!isCurrentSession(sessionEpoch) || dailyLoadVersionRef.current !== loadVersion) {
+        return;
+      }
       dispatch({ type: "SET_DAILY_DATA", payload: today });
     } catch (error) {
-      if (!silent) {
+      if (!silent && isCurrentSession(sessionEpoch) && dailyLoadVersionRef.current === loadVersion) {
         dispatch({ type: "SET_DAILY_ERROR", payload: error instanceof Error ? error.message : "加载每日一题失败。" });
       }
     } finally {
-      if (!silent) {
+      if (
+        isCurrentSession(sessionEpoch) &&
+        dailyLoadVersionRef.current === loadVersion &&
+        dailyLoadingOwnerRef.current === loadVersion
+      ) {
+        dailyLoadingOwnerRef.current = null;
         dispatch({ type: "SET_DAILY_LOADING", payload: false });
       }
     }
-  }, [token]);
+  }, [token, isCurrentSession]);
 
   const loadTodayMood = useCallback(async (): Promise<void> => {
     if (!token) {
       return;
     }
 
+    const sessionEpoch = sessionEpochRef.current;
+    const loadVersion = ++moodLoadVersionRef.current;
     try {
       const todayMood = await getTodayMood(token);
+      if (!isCurrentSession(sessionEpoch) || moodLoadVersionRef.current !== loadVersion) {
+        return;
+      }
       dispatch({ type: "SET_MOOD_STATUS", payload: todayMood });
     } catch {
-      dispatch({ type: "SET_MOOD_STATUS", payload: null });
+      if (isCurrentSession(sessionEpoch) && moodLoadVersionRef.current === loadVersion) {
+        dispatch({ type: "SET_MOOD_STATUS", payload: null });
+      }
     }
-  }, [token]);
+  }, [token, isCurrentSession]);
 
   useEffect(() => {
     if (!token || !currentUserId || desktopRole === "auth") {
@@ -290,13 +338,13 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
     };
   }, [token, currentUser, desktopRole, loadDailyQuestion]);
 
-  // ---- 登出时重置 ----
-
+  // REST 保存资料成功时 Auth 会先更新 currentUser；即使 Socket 暂时断线，
+  // 当前窗口里的投票者资料也要立即同步。
   useEffect(() => {
-    if (!token || !currentUserId) {
-      dispatch({ type: "CLEAR" });
+    if (currentUser) {
+      dispatch({ type: "UPDATE_DAILY_VOTERS", payload: currentUser });
     }
-  }, [token, currentUserId]);
+  }, [currentUser]);
 
   // ---- Handler ----
 
@@ -307,12 +355,22 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const sessionEpoch = sessionEpochRef.current;
+      // 用户提交答案后，任何更早开始的加载结果都不得覆盖提交结果。
+      dailyLoadVersionRef.current += 1;
+      if (dailyLoadingOwnerRef.current !== null) {
+        dailyLoadingOwnerRef.current = null;
+        dispatch({ type: "SET_DAILY_LOADING", payload: false });
+      }
       dispatch({ type: "SET_DAILY_ERROR", payload: null });
       try {
         const result = await submitTodayAnswer(token, {
           questionId: question.question.id,
           answerIndex
         });
+        if (!isCurrentSession(sessionEpoch)) {
+          return;
+        }
         dispatch({
           type: "SET_DAILY_DATA",
           payload: {
@@ -323,10 +381,12 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
           }
         });
       } catch (error) {
-        dispatch({ type: "SET_DAILY_ERROR", payload: error instanceof Error ? error.message : "提交答案失败。" });
+        if (isCurrentSession(sessionEpoch)) {
+          dispatch({ type: "SET_DAILY_ERROR", payload: error instanceof Error ? error.message : "提交答案失败。" });
+        }
       }
     },
-    [token, state.dailyData]
+    [token, state.dailyData, isCurrentSession]
   );
 
   const selectMood = useCallback(
@@ -335,9 +395,15 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const sessionEpoch = sessionEpochRef.current;
+      // 保存心情后，以该响应为准，忽略更早开始的心情读取。
+      moodLoadVersionRef.current += 1;
       dispatch({ type: "SET_MOOD_LOADING", payload: true });
       try {
         const result = await setTodayMood(token, { emoji });
+        if (!isCurrentSession(sessionEpoch)) {
+          return;
+        }
         dispatch({
           type: "SET_MOOD_STATUS",
           payload: {
@@ -347,11 +413,16 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
             shouldPrompt: false
           }
         });
+        if (currentUserId) {
+          updateMoodForUser(currentUserId, result.mood);
+        }
       } finally {
-        dispatch({ type: "SET_MOOD_LOADING", payload: false });
+        if (isCurrentSession(sessionEpoch)) {
+          dispatch({ type: "SET_MOOD_LOADING", payload: false });
+        }
       }
     },
-    [token, state.moodStatus]
+    [token, currentUserId, state.moodStatus, isCurrentSession, updateMoodForUser]
   );
 
   const refreshDaily = useCallback(
@@ -362,8 +433,9 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clear = useCallback((): void => {
+    invalidateSession();
     dispatch({ type: "CLEAR" });
-  }, []);
+  }, [invalidateSession]);
 
   // ---- 派生值 + Context value ----
 

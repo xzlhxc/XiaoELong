@@ -67,14 +67,28 @@ describe("createInitialState", () => {
 describe("authReducer", () => {
   // ---- 正常路径 ----
 
-  it("SET_TOKEN 更新 token", () => {
-    const state = makeState({ token: null });
+  it("SET_TOKEN 切换会话时更新 token 并清空旧用户", () => {
+    const oldUser = { id: "u1", nickname: "旧用户", avatarUrl: null, createdAt: "2026-01-01" };
+    const state = makeState({ token: "old-token", currentUser: oldUser, booting: false });
     const action: AuthAction = { type: "SET_TOKEN", payload: "new-token" };
     const next = authReducer(state, action);
     expect(next.token).toBe("new-token");
-    // 其他状态不变
-    expect(next.currentUser).toBe(state.currentUser);
-    expect(next.booting).toBe(state.booting);
+    expect(next.currentUser).toBeNull();
+    expect(next.booting).toBe(true);
+  });
+
+  it("SET_TOKEN 收到相同 token 时会重试失败的会话恢复", () => {
+    const state = makeState({
+      token: "same-token",
+      currentUser: null,
+      booting: false,
+      sessionRestoreError: "网络错误",
+      sessionRetryKey: 2
+    });
+    const next = authReducer(state, { type: "SET_TOKEN", payload: "same-token" });
+    expect(next.booting).toBe(true);
+    expect(next.sessionRestoreError).toBeNull();
+    expect(next.sessionRetryKey).toBe(3);
   });
 
   it("AUTH_START 设置 authLoading=true, 清除 authError", () => {
@@ -92,6 +106,7 @@ describe("authReducer", () => {
     const next = authReducer(state, action);
     expect(next.token).toBe("t1");
     expect(next.currentUser).toEqual(user);
+    expect(next.booting).toBe(true);
     expect(next.authLoading).toBe(false);
     expect(next.authError).toBeNull();
   });
@@ -135,8 +150,13 @@ describe("authReducer", () => {
   });
 
   it("PROFILE_UPDATE_FAILURE 设置 profileError, 清除保存态", () => {
-    const state = makeState({ profileSaving: true, profileError: null });
-    const action: AuthAction = { type: "PROFILE_UPDATE_FAILURE", payload: "昵称已被占用" };
+    const user = { id: "u1", nickname: "测试", avatarUrl: null, createdAt: "2026-01-01" };
+    const request = { token: "t1", userId: user.id };
+    const state = makeState({ token: request.token, currentUser: user, profileSaving: true, profileError: null });
+    const action: AuthAction = {
+      type: "PROFILE_UPDATE_FAILURE",
+      payload: { request, message: "昵称已被占用" }
+    };
     const next = authReducer(state, action);
     expect(next.profileError).toBe("昵称已被占用");
     expect(next.profileSaving).toBe(false);
@@ -208,12 +228,16 @@ describe("authReducer", () => {
   });
 
   it("PROFILE_UPDATE_START 设置保存态, 清错误和已保存标记", () => {
+    const user = { id: "u1", nickname: "测试", avatarUrl: null, createdAt: "2026-01-01" };
+    const request = { token: "t1", userId: user.id };
     const state = makeState({
+      token: request.token,
+      currentUser: user,
       profileSaving: false,
       profileError: "旧错误",
       profileSaved: true
     });
-    const action: AuthAction = { type: "PROFILE_UPDATE_START" };
+    const action: AuthAction = { type: "PROFILE_UPDATE_START", payload: request };
     const next = authReducer(state, action);
     expect(next.profileSaving).toBe(true);
     expect(next.profileError).toBeNull();
@@ -223,12 +247,25 @@ describe("authReducer", () => {
   it("PROFILE_UPDATE_SUCCESS 更新 currentUser, 保存态完成", () => {
     const oldUser = { id: "u1", nickname: "旧名", avatarUrl: null, createdAt: "2026-01-01" };
     const newUser = { id: "u1", nickname: "新名", avatarUrl: "/avatar.png", createdAt: "2026-01-01" };
-    const state = makeState({ currentUser: oldUser, profileSaving: true });
-    const action: AuthAction = { type: "PROFILE_UPDATE_SUCCESS", payload: newUser };
+    const request = { token: "t1", userId: oldUser.id };
+    const state = makeState({ token: request.token, currentUser: oldUser, profileSaving: true });
+    const action: AuthAction = { type: "PROFILE_UPDATE_SUCCESS", payload: { request, user: newUser } };
     const next = authReducer(state, action);
     expect(next.currentUser).toEqual(newUser);
     expect(next.profileSaving).toBe(false);
     expect(next.profileSaved).toBe(true);
+  });
+
+  it("PROFILE_UPDATE_SUCCESS 忽略已经切换会话的旧响应", () => {
+    const currentUser = { id: "u2", nickname: "当前用户", avatarUrl: null, createdAt: "2026-01-01" };
+    const staleUser = { id: "u1", nickname: "旧用户新名", avatarUrl: null, createdAt: "2026-01-01" };
+    const state = makeState({ token: "t2", currentUser, profileSaving: false });
+    const action: AuthAction = {
+      type: "PROFILE_UPDATE_SUCCESS",
+      payload: { request: { token: "t1", userId: "u1" }, user: staleUser }
+    };
+
+    expect(authReducer(state, action)).toBe(state);
   });
 
   it("PROFILE_SAVED_DISMISS 清除已保存标记", () => {

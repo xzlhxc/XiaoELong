@@ -21,6 +21,7 @@ import {
   type DailyState
 } from "./DailyContext";
 import { useAuth, type AuthContextValue } from "./AuthContext";
+import { useChat, type ChatContextValue } from "./ChatContext";
 import { useDesktop, type DesktopContextValue } from "./DesktopContext";
 
 // ============================================================
@@ -92,10 +93,13 @@ vi.mock("../services/api", () => ({
 }));
 
 vi.mock("./AuthContext", () => ({ useAuth: vi.fn() }));
+vi.mock("./ChatContext", () => ({ useChat: vi.fn() }));
 vi.mock("./DesktopContext", () => ({ useDesktop: vi.fn() }));
 
 const mockedUseAuth = vi.mocked(useAuth);
+const mockedUseChat = vi.mocked(useChat);
 const mockedUseDesktop = vi.mocked(useDesktop);
+const updateMoodForUserMock = vi.fn();
 
 /**
  * DailyContext 从 useAuth 解构 token / currentUserId / currentUser，
@@ -187,6 +191,7 @@ async function renderDaily() {
 beforeEach(() => {
   socketMock.reset();
   mockedUseAuth.mockReset();
+  mockedUseChat.mockReset();
   mockedUseDesktop.mockReset();
   apiMock.getTodayQuestion.mockReset();
   apiMock.submitTodayAnswer.mockReset();
@@ -195,6 +200,8 @@ beforeEach(() => {
 
   // 默认登录态：有 token + 有用户；角色为 single（全功能）；数据正常返回
   mockAuth("t1", "u1", makeUser("u1"));
+  mockedUseChat.mockReturnValue({ updateMoodForUser: updateMoodForUserMock } as unknown as ChatContextValue);
+  updateMoodForUserMock.mockReset();
   mockDesktop("single");
   apiMock.getTodayQuestion.mockResolvedValue(makeDailyData());
   apiMock.getTodayMood.mockResolvedValue(makeMoodStatus());
@@ -202,6 +209,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mockedUseAuth.mockReset();
+  mockedUseChat.mockReset();
   mockedUseDesktop.mockReset();
 });
 
@@ -480,6 +488,7 @@ describe("操作", () => {
     expect(result.current.moodStatus?.mood?.emoji).toBe("🥰");
     expect(result.current.moodStatus?.shouldPrompt).toBe(false);
     expect(result.current.moodLoading).toBe(false);
+    expect(updateMoodForUserMock).toHaveBeenCalledWith("u1", makeMood("u1", "🥰"));
   });
 
   it("selectMood 失败 → moodLoading 复位（finally 兜底）", async () => {

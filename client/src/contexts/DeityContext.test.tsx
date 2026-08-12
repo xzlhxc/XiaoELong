@@ -369,8 +369,8 @@ describe("deityReducer 边界条件", () => {
     expect(next).toBe(state);
   });
 
-  // B10. CLEAR → 结果等于 createInitialState()
-  it("CLEAR 重置回 createInitialState()", () => {
+  // B10. CLEAR → 清空所有会话数据（不会恢复 Electron 注入的初始神选数据）
+  it("CLEAR 重置为空白会话", () => {
     const state = makeState({
       deityData: makeDeityData(),
       deityError: "x",
@@ -380,7 +380,14 @@ describe("deityReducer 边界条件", () => {
       divineRevealRequestId: 9
     });
     const next = deityReducer(state, { type: "CLEAR" });
-    expect(next).toEqual(createInitialState());
+    expect(next).toEqual({
+      deityData: null,
+      deityError: null,
+      deityLoading: false,
+      deitySubmittingId: null,
+      divineViewSession: 0,
+      divineRevealRequestId: 0
+    });
   });
 });
 

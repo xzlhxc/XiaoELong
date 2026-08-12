@@ -115,13 +115,18 @@ vi.mock("./DesktopContext", () => ({ useDesktop: vi.fn() }));
 
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedUseDesktop = vi.mocked(useDesktop);
+const logoutMock = vi.fn();
 
 /**
- * ChatContext 只从 useAuth/useDesktop 解构 token、currentUserId、desktopRole，
- * 这里只 mock 这三个字段（缺失字段用类型断言占位）。
+ * ChatContext 从 Auth 读取当前用户并在历史 401 时注销；其余字段用类型断言占位。
  */
 function mockAuth(token: string | null, currentUserId: string | null): void {
-  mockedUseAuth.mockReturnValue({ token, currentUserId } as unknown as AuthContextValue);
+  mockedUseAuth.mockReturnValue({
+    token,
+    currentUserId,
+    currentUser: currentUserId ? makeUser(currentUserId) : null,
+    logout: logoutMock
+  } as unknown as AuthContextValue);
 }
 
 function mockDesktop(desktopRole: string): void {
@@ -188,6 +193,7 @@ async function renderChat() {
 
 beforeEach(() => {
   socketMock.reset();
+  logoutMock.mockReset();
   mockedUseAuth.mockReset();
   mockedUseDesktop.mockReset();
   apiMock.getRecentMessages.mockReset();
@@ -210,12 +216,13 @@ afterEach(() => {
 // ============================================================
 
 describe("createInitialState", () => {
-  it("四字段全部为初始值", () => {
+  it("全部字段为初始值", () => {
     const state = createInitialState();
     expect(state.messages).toEqual([]);
     expect(state.presenceUsers).toEqual([]);
     expect(state.sendError).toBeNull();
     expect(state.socketError).toBeNull();
+    expect(state.historyInitialized).toBe(false);
   });
 });
 
@@ -224,10 +231,11 @@ describe("createInitialState", () => {
 // ============================================================
 
 describe("chatReducer 正常路径", () => {
-  it("SET_MESSAGES 全量替换 messages", () => {
+  it("SET_MESSAGES 合并历史与历史加载前先到达的实时消息", () => {
     const state = makeState({ messages: [makeMessage(1)] });
     const next = chatReducer(state, { type: "SET_MESSAGES", payload: [makeMessage(2)] });
-    expect(next.messages).toEqual([makeMessage(2)]);
+    expect(next.messages).toEqual([makeMessage(1), makeMessage(2)]);
+    expect(next.historyInitialized).toBe(true);
   });
 
   it("ADD_MESSAGE 追加一条消息到末尾", () => {
@@ -563,12 +571,13 @@ describe("聊天历史加载", () => {
     expect(result.current.socketError).toBe("聊天记录暂时未加载，实时连接仍会继续重试。");
   });
 
-  it("加载 401 → 静默不报错", async () => {
+  it("加载 401 → 注销失效会话", async () => {
     apiMock.getRecentMessages.mockRejectedValue(new apiMock.MockApiError(401));
     const { result } = await renderChat();
 
     await act(async () => {});
     expect(result.current.socketError).toBeNull();
+    expect(logoutMock).toHaveBeenCalledTimes(1);
   });
 
   it("加载成功 → messages 被填充", async () => {
@@ -577,6 +586,7 @@ describe("聊天历史加载", () => {
 
     await act(async () => {});
     expect(result.current.messages).toEqual([makeMessage(1)]);
+    expect(result.current.historyInitialized).toBe(true);
   });
 });
 
@@ -622,6 +632,15 @@ describe("Provider / 状态转换", () => {
     });
     expect(result.current.presenceUsers).toHaveLength(1);
     expect(result.current.messages).toHaveLength(1);
+    result.current.scrollMemoryRef.current = {
+      scrollTop: 120,
+      atBottom: false,
+      anchorMessageId: 1,
+      anchorOffset: 4,
+      lastMessageId: 1,
+      firstUnreadMessageId: 1,
+      unreadCount: 1
+    };
 
     // 登出：token 变 null
     mockAuth(null, null);
@@ -629,6 +648,7 @@ describe("Provider / 状态转换", () => {
 
     expect(result.current.messages).toEqual([]);
     expect(result.current.presenceUsers).toEqual([]);
+    expect(result.current.scrollMemoryRef.current).toBeNull();
   });
 
   it("desktopRole=avatar 时不监听 chat:message，但其他事件照常监听", async () => {

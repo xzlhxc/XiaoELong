@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer } from "react";
-import type { UserProfile } from "@xiaoelong/shared";
+import type { UserProfile, UserUpdatePayload } from "@xiaoelong/shared";
 import {
   ApiError,
   deleteCurrentUser,
@@ -7,7 +7,7 @@ import {
   joinWithInvite,
   updateCurrentProfile,
 } from "../services/api";
-import { disconnectSharedSocket } from "../services/socket";
+import { disconnectSharedSocket, getOrCreateSocket } from "../services/socket";
 
 // ============================================================
 // 常量
@@ -48,9 +48,10 @@ export type AuthAction =
   | { type: "SESSION_RETRY" }
   | { type: "BOOTSTRAP_NO_TOKEN" }
   | { type: "LOGOUT" }
-  | { type: "PROFILE_UPDATE_START" }
-  | { type: "PROFILE_UPDATE_SUCCESS"; payload: UserProfile }
-  | { type: "PROFILE_UPDATE_FAILURE"; payload: string }
+  | { type: "PROFILE_UPDATE_START"; payload: ProfileUpdateRequest }
+  | { type: "PROFILE_UPDATE_SUCCESS"; payload: { request: ProfileUpdateRequest; user: UserProfile } }
+  | { type: "PROFILE_UPDATE_FAILURE"; payload: { request: ProfileUpdateRequest; message: string } }
+  | { type: "SYNC_CURRENT_USER"; payload: { token: string; user: UserProfile } }
   | { type: "PROFILE_SAVED_DISMISS" }
   | { type: "ACCOUNT_DELETE_START" }
   | { type: "ACCOUNT_DELETE_FINISH" };
@@ -74,6 +75,15 @@ function getInitialAccessToken(): string | null {
 
 function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiError && error.statusCode === 401;
+}
+
+interface ProfileUpdateRequest {
+  token: string;
+  userId: string;
+}
+
+function matchesProfileUpdateRequest(state: AuthState, request: ProfileUpdateRequest): boolean {
+  return state.token === request.token && state.currentUser?.id === request.userId;
 }
 
 // ============================================================
@@ -103,7 +113,27 @@ export function createInitialState(): AuthState {
 export function authReducer(state: AuthState, action: AuthAction): AuthState {
   switch (action.type) {
     case "SET_TOKEN":
-      return { ...state, token: action.payload };
+      if (state.token === action.payload) {
+        if (state.currentUser || state.booting) {
+          return state;
+        }
+        return {
+          ...state,
+          booting: true,
+          sessionRestoreError: null,
+          sessionRetryKey: state.sessionRetryKey + 1
+        };
+      }
+      return {
+        ...state,
+        token: action.payload,
+        currentUser: null,
+        booting: true,
+        sessionRestoreError: null,
+        profileSaving: false,
+        profileError: null,
+        profileSaved: false
+      };
 
     case "AUTH_START":
       return { ...state, authLoading: true, authError: null };
@@ -113,6 +143,7 @@ export function authReducer(state: AuthState, action: AuthAction): AuthState {
         ...state,
         token: action.payload.token,
         currentUser: action.payload.user,
+        booting: true,
         authLoading: false,
         authError: null,
       };
@@ -151,18 +182,36 @@ export function authReducer(state: AuthState, action: AuthAction): AuthState {
       };
 
     case "PROFILE_UPDATE_START":
+      if (!matchesProfileUpdateRequest(state, action.payload)) {
+        return state;
+      }
       return { ...state, profileSaving: true, profileError: null, profileSaved: false };
 
     case "PROFILE_UPDATE_SUCCESS":
+      if (
+        !matchesProfileUpdateRequest(state, action.payload.request) ||
+        action.payload.user.id !== action.payload.request.userId
+      ) {
+        return state;
+      }
       return {
         ...state,
-        currentUser: action.payload,
+        currentUser: action.payload.user,
         profileSaving: false,
         profileSaved: true,
       };
 
     case "PROFILE_UPDATE_FAILURE":
-      return { ...state, profileSaving: false, profileError: action.payload };
+      if (!matchesProfileUpdateRequest(state, action.payload.request)) {
+        return state;
+      }
+      return { ...state, profileSaving: false, profileError: action.payload.message };
+
+    case "SYNC_CURRENT_USER":
+      if (state.token !== action.payload.token || state.currentUser?.id !== action.payload.user.id) {
+        return state;
+      }
+      return { ...state, currentUser: action.payload.user };
 
     case "PROFILE_SAVED_DISMISS":
       return { ...state, profileSaved: false };
@@ -248,14 +297,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updateProfile = useCallback(
     async (payload: { nickname: string; avatarFile: File | null }): Promise<void> => {
-      if (!state.token) {
-        dispatch({ type: "PROFILE_UPDATE_FAILURE", payload: "登录已失效，请重新打开小鳄龙。" });
+      const requestToken = state.token;
+      const requestUserId = state.currentUser?.id;
+      if (!requestToken || !requestUserId) {
         return;
       }
 
+      const request: ProfileUpdateRequest = {
+        token: requestToken,
+        userId: requestUserId
+      };
+
       const nickname = payload.nickname.trim();
       if (!nickname) {
-        dispatch({ type: "PROFILE_UPDATE_FAILURE", payload: "昵称不能为空。" });
+        dispatch({
+          type: "PROFILE_UPDATE_FAILURE",
+          payload: { request, message: "昵称不能为空。" }
+        });
         return;
       }
 
@@ -265,19 +323,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         formData.append("avatar", payload.avatarFile);
       }
 
-      dispatch({ type: "PROFILE_UPDATE_START" });
+      dispatch({ type: "PROFILE_UPDATE_START", payload: request });
 
       try {
-        const response = await updateCurrentProfile(state.token, formData);
-        dispatch({ type: "PROFILE_UPDATE_SUCCESS", payload: response.user });
+        const response = await updateCurrentProfile(requestToken, formData);
+        dispatch({
+          type: "PROFILE_UPDATE_SUCCESS",
+          payload: { request, user: response.user }
+        });
       } catch (error) {
         dispatch({
           type: "PROFILE_UPDATE_FAILURE",
-          payload: error instanceof ApiError ? error.message : "保存资料失败，请重试。",
+          payload: {
+            request,
+            message: error instanceof ApiError ? error.message : "保存资料失败，请重试。"
+          }
         });
       }
     },
-    [state.token]
+    [state.token, state.currentUser?.id]
   );
 
   const deleteAccount = useCallback(async (): Promise<void> => {
@@ -375,6 +439,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("online", retryWhenOnline);
     };
   }, [state.token, state.currentUser]);
+
+  // ---- 当前用户资料实时同步 ----
+
+  useEffect(() => {
+    if (!state.token || !currentUserId || window.xiaoelongDesktop?.role === "auth") {
+      return;
+    }
+
+    const token = state.token;
+    const socket = getOrCreateSocket(token);
+    const handleUserUpdate = (payload: UserUpdatePayload): void => {
+      if (payload.user.id !== currentUserId) {
+        return;
+      }
+      dispatch({ type: "SYNC_CURRENT_USER", payload: { token, user: payload.user } });
+    };
+
+    socket.on("user:update", handleUserUpdate);
+    return () => {
+      socket.off("user:update", handleUserUpdate);
+    };
+  }, [state.token, currentUserId]);
 
   // ---- profileSaved 自动消失（2.2 秒） ----
 

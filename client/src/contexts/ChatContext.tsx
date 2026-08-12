@@ -26,6 +26,7 @@ export interface ChatState {
   presenceUsers: PresenceUser[];
   sendError: string | null;
   socketError: string | null;
+  historyInitialized: boolean;
 }
 
 export interface SendMessagePayload {
@@ -51,7 +52,9 @@ export interface ChatScrollMemory {
 // ============================================================
 
 export type ChatAction =
+  | { type: "START_HISTORY" }
   | { type: "SET_MESSAGES"; payload: ChatMessage[] }
+  | { type: "SET_HISTORY_INITIALIZED"; payload: boolean }
   | { type: "ADD_MESSAGE"; payload: ChatMessage }
   | { type: "SET_PRESENCE_USERS"; payload: PresenceUser[] }
   | { type: "UPDATE_PRESENCE_ONLINE"; payload: PresenceDeltaPayload }
@@ -142,7 +145,8 @@ export function createInitialState(): ChatState {
     messages: [],
     presenceUsers: [],
     sendError: null,
-    socketError: null
+    socketError: null,
+    historyInitialized: false
   };
 }
 
@@ -152,8 +156,19 @@ export function createInitialState(): ChatState {
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
+    case "START_HISTORY":
+      return { ...state, historyInitialized: false };
+
     case "SET_MESSAGES":
-      return { ...state, messages: action.payload };
+      return {
+        ...state,
+        messages: dedupeMessages([...action.payload, ...state.messages])
+          .sort((left, right) => left.id - right.id),
+        historyInitialized: true
+      };
+
+    case "SET_HISTORY_INITIALIZED":
+      return { ...state, historyInitialized: action.payload };
 
     case "ADD_MESSAGE":
       return { ...state, messages: dedupeMessages([...state.messages, action.payload]) };
@@ -199,6 +214,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
 export interface ChatContextValue extends ChatState {
   sendMessage: (payload: SendMessagePayload) => Promise<void>;
+  updateMoodForUser: (userId: string, mood: DailyMood) => void;
   clear: () => void;
   scrollMemoryRef: MutableRefObject<ChatScrollMemory | null>;
 }
@@ -215,8 +231,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   // ChatPanel 的滚动记忆 ref：Provider 常驻，切 tab 卸载后仍保留，跨挂载恢复滚动位置
   const scrollMemoryRef = useRef<ChatScrollMemory | null>(null);
 
-  const { token, currentUserId } = useAuth();
+  const { token, currentUserId, currentUser, logout } = useAuth();
   const { desktopRole } = useDesktop();
+
+  const clear = useCallback((): void => {
+    scrollMemoryRef.current = null;
+    dispatch({ type: "CLEAR" });
+  }, []);
+
+  const updateMoodForUser = useCallback((userId: string, mood: DailyMood): void => {
+    dispatch({ type: "UPDATE_MOOD_IN_PRESENCE", payload: { userId, mood } });
+  }, []);
 
   // ---- 聊天历史加载 ----
 
@@ -226,6 +251,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     let canceled = false;
+    dispatch({ type: "START_HISTORY" });
 
     async function loadChatHistory(): Promise<void> {
       try {
@@ -235,9 +261,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         }
         dispatch({ type: "SET_MESSAGES", payload: history.messages });
       } catch (error) {
-        if (!canceled && !isUnauthorizedError(error)) {
-          dispatch({ type: "SET_SOCKET_ERROR", payload: "聊天记录暂时未加载，实时连接仍会继续重试。" });
+        if (canceled) {
+          return;
         }
+        if (isUnauthorizedError(error)) {
+          window.xiaoelongDesktop?.requestLogout?.();
+          logout();
+          return;
+        }
+        dispatch({ type: "SET_SOCKET_ERROR", payload: "聊天记录暂时未加载，实时连接仍会继续重试。" });
+        dispatch({ type: "SET_HISTORY_INITIALIZED", payload: true });
       }
     }
 
@@ -245,7 +278,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => {
       canceled = true;
     };
-  }, [token, currentUserId]);
+  }, [token, currentUserId, logout]);
+
+  // ---- 当前用户资料变更同步到聊天与成员列表 ----
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    dispatch({ type: "UPDATE_USER_IN_PRESENCE", payload: currentUser });
+    dispatch({ type: "UPDATE_USER_IN_MESSAGES", payload: currentUser });
+  }, [currentUser]);
 
   // ---- Socket 连接 + 事件监听 ----
 
@@ -317,9 +360,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!token || !currentUserId) {
-      dispatch({ type: "CLEAR" });
+      clear();
     }
-  }, [token, currentUserId]);
+  }, [token, currentUserId, clear]);
 
   // ---- Handler ----
 
@@ -395,20 +438,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [token]
   );
 
-  const clear = useCallback((): void => {
-    dispatch({ type: "CLEAR" });
-  }, []);
-
   // ---- Context value ----
 
   const value = useMemo<ChatContextValue>(
     () => ({
       ...state,
       sendMessage,
+      updateMoodForUser,
       clear,
       scrollMemoryRef
     }),
-    [state, sendMessage, clear, scrollMemoryRef]
+    [state, sendMessage, updateMoodForUser, clear, scrollMemoryRef]
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

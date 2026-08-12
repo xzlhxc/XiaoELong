@@ -59,13 +59,21 @@ function getInitialDivineSession(): InitialDivineSession {
 
 const INITIAL_DIVINE_SESSION = getInitialDivineSession();
 
-export function createInitialState(): DeityState {
+function createClearedState(): DeityState {
   return {
-    deityData: INITIAL_DIVINE_SESSION.data,
+    deityData: null,
     deityError: null,
     deityLoading: false,
     deitySubmittingId: null,
     divineViewSession: 0,
+    divineRevealRequestId: 0
+  };
+}
+
+export function createInitialState(): DeityState {
+  return {
+    ...createClearedState(),
+    deityData: INITIAL_DIVINE_SESSION.data,
     divineRevealRequestId: INITIAL_DIVINE_SESSION.requestId
   };
 }
@@ -112,7 +120,7 @@ export function deityReducer(state: DeityState, action: DeityAction): DeityState
       return { ...state, divineRevealRequestId: action.payload };
 
     case "CLEAR":
-      return createInitialState();
+      return createClearedState();
 
     default:
       return state;
@@ -160,17 +168,40 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
   const { desktopRole, activeTab, setActiveTab } = useDesktop();
 
   const deityDataVersionRef = useRef(0);
+  const sessionEpochRef = useRef(0);
+  const sessionIdentityRef = useRef({ token, userId: currentUserId });
+  const previousSessionIdentity = sessionIdentityRef.current;
+  const tokenChanged = previousSessionIdentity.token !== token;
+  const userChanged = previousSessionIdentity.userId !== currentUserId;
+  const isInitialUserResolution =
+    !tokenChanged && previousSessionIdentity.userId === null && currentUserId !== null;
+  if (tokenChanged || (userChanged && !isInitialUserResolution)) {
+    sessionEpochRef.current += 1;
+    deityDataVersionRef.current += 1;
+  }
+  sessionIdentityRef.current = { token, userId: currentUserId };
+  const sessionEpoch = sessionEpochRef.current;
+  const clearedSessionEpochRef = useRef(sessionEpoch);
   const appliedDivineSessionRequestIdRef = useRef(INITIAL_DIVINE_SESSION.requestId);
 
   // ---- 数据加载 ----
 
   const loadDeityWorship = useCallback(
     async (options?: { silent?: boolean }): Promise<DeityWorshipTodayResponse | null> => {
-      if (!token) {
+      if (
+        !token ||
+        !currentUserId ||
+        sessionIdentityRef.current.token !== token ||
+        sessionIdentityRef.current.userId !== currentUserId
+      ) {
         return null;
       }
 
+      const requestSessionEpoch = sessionEpochRef.current;
       const dataVersion = deityDataVersionRef.current;
+      const isRequestCurrent = (): boolean =>
+        requestSessionEpoch === sessionEpochRef.current &&
+        dataVersion === deityDataVersionRef.current;
       const silent = options?.silent ?? false;
       if (!silent) {
         dispatch({ type: "SET_DEITY_LOADING", payload: true });
@@ -178,14 +209,14 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
       }
       try {
         const today = await getTodayDeityWorship(token);
-        if (dataVersion !== deityDataVersionRef.current) {
+        if (!isRequestCurrent()) {
           return null;
         }
         dispatch({ type: "SET_DEITY_DATA", payload: today });
         dispatch({ type: "SET_DEITY_ERROR", payload: null });
         return today;
       } catch (error) {
-        if (!silent && dataVersion === deityDataVersionRef.current) {
+        if (!silent && isRequestCurrent()) {
           dispatch({
             type: "SET_DEITY_ERROR",
             payload: error instanceof Error ? error.message : "加载神选状态失败。"
@@ -193,12 +224,12 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
         }
         return null;
       } finally {
-        if (!silent) {
+        if (!silent && isRequestCurrent()) {
           dispatch({ type: "SET_DEITY_LOADING", payload: false });
         }
       }
     },
-    [token]
+    [token, currentUserId]
   );
 
   // ---- ① 数据加载（非 auth/avatar 角色） ----
@@ -267,8 +298,16 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
     }
 
     const socket = getOrCreateSocket(token);
+    const listenerIdentity = { token, userId: currentUserId };
 
     const handleDeityWorship = (payload: DeityWorshipUpdatePayload): void => {
+      if (
+        listenerIdentity.token !== sessionIdentityRef.current.token ||
+        listenerIdentity.userId !== sessionIdentityRef.current.userId
+      ) {
+        return;
+      }
+      deityDataVersionRef.current += 1;
       dispatch({ type: "UPDATE_DEITY_STATUS", payload });
     };
 
@@ -310,6 +349,9 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
     }
 
     return window.xiaoelongDesktop.onDivineReturn?.((divineState) => {
+      if (!sessionIdentityRef.current.token || !sessionIdentityRef.current.userId) {
+        return;
+      }
       if (divineState.data) {
         deityDataVersionRef.current += 1;
         dispatch({ type: "SET_DEITY_DATA", payload: divineState.data });
@@ -321,43 +363,65 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
   // ---- ⑧ 登出清理 ----
 
   useEffect(() => {
-    if (!token || !currentUserId) {
+    const sessionChanged = clearedSessionEpochRef.current !== sessionEpoch;
+    if (sessionChanged || !token || (!booting && !currentUserId)) {
+      clearedSessionEpochRef.current = sessionEpoch;
       dispatch({ type: "CLEAR" });
     }
-  }, [token, currentUserId]);
+  }, [token, currentUserId, booting, sessionEpoch]);
 
   // ---- Handler ----
 
   const worship = useCallback(
     async (deityId: DeityId): Promise<DeityWorshipResponse | null> => {
-      if (!token || state.deitySubmittingId !== null) {
+      if (
+        !token ||
+        !currentUserId ||
+        sessionIdentityRef.current.token !== token ||
+        sessionIdentityRef.current.userId !== currentUserId ||
+        state.deitySubmittingId !== null
+      ) {
         return null;
       }
 
+      const requestSessionEpoch = sessionEpochRef.current;
+      const isSessionCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
       dispatch({ type: "SET_DEITY_SUBMITTING_ID", payload: deityId });
       dispatch({ type: "SET_DEITY_ERROR", payload: null });
       try {
         const result = await submitDeityWorship(token, { deityId });
+        if (!isSessionCurrent()) {
+          return null;
+        }
         deityDataVersionRef.current += 1;
         dispatch({ type: "SET_DEITY_DATA", payload: result });
         window.xiaoelongDesktop?.updateDivineSelectionData?.(result);
         return result;
       } catch (error) {
         if (error instanceof ApiError && error.statusCode === 409) {
+          if (!isSessionCurrent()) {
+            return null;
+          }
           await loadDeityWorship({ silent: true });
-          dispatch({ type: "SET_DEITY_ERROR", payload: null });
+          if (isSessionCurrent()) {
+            dispatch({ type: "SET_DEITY_ERROR", payload: null });
+          }
           return null;
         }
-        dispatch({
-          type: "SET_DEITY_ERROR",
-          payload: error instanceof Error ? error.message : "膜拜失败，请稍后重试。"
-        });
+        if (isSessionCurrent()) {
+          dispatch({
+            type: "SET_DEITY_ERROR",
+            payload: error instanceof Error ? error.message : "膜拜失败，请稍后重试。"
+          });
+        }
         return null;
       } finally {
-        dispatch({ type: "SET_DEITY_SUBMITTING_ID", payload: null });
+        if (isSessionCurrent()) {
+          dispatch({ type: "SET_DEITY_SUBMITTING_ID", payload: null });
+        }
       }
     },
-    [token, state.deitySubmittingId, loadDeityWorship]
+    [token, currentUserId, state.deitySubmittingId, loadDeityWorship]
   );
 
   const selectDivineTab = useCallback(
@@ -377,6 +441,9 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clear = useCallback((): void => {
+    sessionEpochRef.current += 1;
+    deityDataVersionRef.current += 1;
+    clearedSessionEpochRef.current = sessionEpochRef.current;
     dispatch({ type: "CLEAR" });
   }, []);
 

@@ -225,8 +225,22 @@ const GomokuContext = createContext<GomokuContextValue | null>(null);
 export function GomokuProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(gomokuReducer, null, createInitialState);
 
-  const { token, currentUserId } = useAuth();
+  const { token, currentUserId, currentUser } = useAuth();
   const { desktopRole, setPetReaction } = useDesktop();
+
+  const sessionEpochRef = useRef(0);
+  const sessionIdentityRef = useRef({ token, userId: currentUserId });
+  const previousSessionIdentity = sessionIdentityRef.current;
+  const tokenChanged = previousSessionIdentity.token !== token;
+  const userChanged = previousSessionIdentity.userId !== currentUserId;
+  const isInitialUserResolution =
+    !tokenChanged && previousSessionIdentity.userId === null && currentUserId !== null;
+  if (tokenChanged || (userChanged && !isInitialUserResolution)) {
+    sessionEpochRef.current += 1;
+  }
+  sessionIdentityRef.current = { token, userId: currentUserId };
+  const sessionEpoch = sessionEpochRef.current;
+  const clearedSessionEpochRef = useRef(sessionEpoch);
 
   // 防重复落子：同一对局提交期间加锁
   const pendingGomokuMoveIdsRef = useRef<Set<number>>(new Set());
@@ -234,21 +248,34 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
   // ---- 加载对局列表 ----
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (!token) {
+    if (
+      !token ||
+      !currentUserId ||
+      sessionIdentityRef.current.token !== token ||
+      sessionIdentityRef.current.userId !== currentUserId
+    ) {
       return;
     }
 
+    const requestSessionEpoch = sessionEpochRef.current;
+    const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_ERROR", payload: null });
     try {
       const result = await getGomokuGames(token);
-      dispatch({ type: "SET_GAMES", payload: result.games });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_GAMES", payload: result.games });
+      }
     } catch (error) {
-      dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "加载五子棋对局失败。" });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "加载五子棋对局失败。" });
+      }
     } finally {
-      dispatch({ type: "SET_LOADING", payload: false });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
     }
-  }, [token]);
+  }, [token, currentUserId]);
 
   // ---- ① 数据加载 + Socket 监听（按角色分流） ----
 
@@ -262,16 +289,27 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
     }
 
     const socket = getOrCreateSocket(token);
+    const listenerIdentity = { token, userId: currentUserId };
+    const isListenerCurrent = (): boolean =>
+      listenerIdentity.token === sessionIdentityRef.current.token &&
+      listenerIdentity.userId === sessionIdentityRef.current.userId;
 
     const handleUserUpdate = (payload: UserUpdatePayload): void => {
-      dispatch({ type: "APPLY_USER_UPDATE", payload: payload.user });
+      if (isListenerCurrent()) {
+        dispatch({ type: "APPLY_USER_UPDATE", payload: payload.user });
+      }
     };
 
     const handleGomokuUpdate = (payload: GomokuUpdatePayload): void => {
-      dispatch({ type: "UPSERT_GAME", payload: payload.game });
+      if (isListenerCurrent()) {
+        dispatch({ type: "UPSERT_GAME", payload: payload.game });
+      }
     };
 
     const handleGomokuEnd = (payload: GomokuEndPayload): void => {
+      if (!isListenerCurrent()) {
+        return;
+      }
       if (desktopRole !== "avatar") {
         dispatch({ type: "UPSERT_GAME", payload: payload.game });
       }
@@ -300,10 +338,19 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
   // ---- ② 登出清理 ----
 
   useEffect(() => {
-    if (!token || !currentUserId) {
+    const sessionChanged = clearedSessionEpochRef.current !== sessionEpoch;
+    if (sessionChanged || !token || !currentUserId) {
+      clearedSessionEpochRef.current = sessionEpoch;
+      pendingGomokuMoveIdsRef.current.clear();
       dispatch({ type: "CLEAR" });
     }
-  }, [token, currentUserId]);
+  }, [token, currentUserId, sessionEpoch]);
+
+  useEffect(() => {
+    if (currentUser && currentUser.id === currentUserId) {
+      dispatch({ type: "APPLY_USER_UPDATE", payload: currentUser });
+    }
+  }, [currentUser, currentUserId]);
 
   // ---- Handler ----
 
@@ -313,57 +360,107 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
 
   const invite = useCallback(async (targetUserId: string): Promise<void> => {
     const socket = getSharedSocket();
+    if (
+      !token ||
+      !currentUserId ||
+      sessionIdentityRef.current.token !== token ||
+      sessionIdentityRef.current.userId !== currentUserId
+    ) {
+      return;
+    }
     if (!socket) {
       dispatch({ type: "SET_ERROR", payload: "连接未建立，无法发起邀请。" });
       return;
     }
 
+    const requestSessionEpoch = sessionEpochRef.current;
+    const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
     dispatch({ type: "SET_ERROR", payload: null });
     try {
       const result = await emitWithAck<{ game: GomokuGame }>(socket, "gomoku:invite", { targetUserId });
-      dispatch({ type: "UPSERT_GAME", payload: result.game });
-      dispatch({ type: "SET_SELECTED_GAME", payload: result.game.id });
+      if (isRequestCurrent()) {
+        dispatch({ type: "UPSERT_GAME", payload: result.game });
+        dispatch({ type: "SET_SELECTED_GAME", payload: result.game.id });
+      }
     } catch (error) {
-      dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "发起邀请失败。" });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "发起邀请失败。" });
+      }
     }
-  }, []);
+  }, [token, currentUserId]);
 
   const accept = useCallback(async (gameId: number): Promise<void> => {
     const socket = getSharedSocket();
+    if (
+      !token ||
+      !currentUserId ||
+      sessionIdentityRef.current.token !== token ||
+      sessionIdentityRef.current.userId !== currentUserId
+    ) {
+      return;
+    }
     if (!socket) {
       dispatch({ type: "SET_ERROR", payload: "连接未建立，无法接受邀请。" });
       return;
     }
 
+    const requestSessionEpoch = sessionEpochRef.current;
+    const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
     dispatch({ type: "SET_ERROR", payload: null });
     try {
       const result = await emitWithAck<{ game: GomokuGame }>(socket, "gomoku:accept", { gameId });
-      dispatch({ type: "UPSERT_GAME", payload: result.game });
-      dispatch({ type: "SET_SELECTED_GAME", payload: result.game.id });
+      if (isRequestCurrent()) {
+        dispatch({ type: "UPSERT_GAME", payload: result.game });
+        dispatch({ type: "SET_SELECTED_GAME", payload: result.game.id });
+      }
     } catch (error) {
-      dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "接受邀请失败。" });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "接受邀请失败。" });
+      }
     }
-  }, []);
+  }, [token, currentUserId]);
 
   const reject = useCallback(async (gameId: number): Promise<void> => {
     const socket = getSharedSocket();
+    if (
+      !token ||
+      !currentUserId ||
+      sessionIdentityRef.current.token !== token ||
+      sessionIdentityRef.current.userId !== currentUserId
+    ) {
+      return;
+    }
     if (!socket) {
       dispatch({ type: "SET_ERROR", payload: "连接未建立，无法拒绝邀请。" });
       return;
     }
 
+    const requestSessionEpoch = sessionEpochRef.current;
+    const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
     dispatch({ type: "SET_ERROR", payload: null });
     try {
       const result = await emitWithAck<{ game: GomokuGame }>(socket, "gomoku:reject", { gameId });
-      dispatch({ type: "UPSERT_GAME", payload: result.game });
-      dispatch({ type: "SET_SELECTED_GAME", payload: result.game.id });
+      if (isRequestCurrent()) {
+        dispatch({ type: "UPSERT_GAME", payload: result.game });
+        dispatch({ type: "SET_SELECTED_GAME", payload: result.game.id });
+      }
     } catch (error) {
-      dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "拒绝邀请失败。" });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "拒绝邀请失败。" });
+      }
     }
-  }, []);
+  }, [token, currentUserId]);
 
   const move = useCallback(async (gameId: number, row: number, col: number): Promise<boolean> => {
     const socket = getSharedSocket();
+    if (
+      !token ||
+      !currentUserId ||
+      sessionIdentityRef.current.token !== token ||
+      sessionIdentityRef.current.userId !== currentUserId
+    ) {
+      return false;
+    }
     if (!socket) {
       dispatch({ type: "SET_ERROR", payload: "连接未建立，无法落子。" });
       return false;
@@ -372,21 +469,33 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
 
+    const requestSessionEpoch = sessionEpochRef.current;
+    const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
     pendingGomokuMoveIdsRef.current.add(gameId);
     dispatch({ type: "SET_ERROR", payload: null });
     try {
       const result = await emitWithAck<{ game: GomokuGame }>(socket, "gomoku:move", { gameId, row, col });
-      dispatch({ type: "UPSERT_GAME", payload: result.game });
-      return true;
+      if (isRequestCurrent()) {
+        dispatch({ type: "UPSERT_GAME", payload: result.game });
+        return true;
+      }
+      return false;
     } catch (error) {
-      dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "落子失败。" });
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "落子失败。" });
+      }
       return false;
     } finally {
-      pendingGomokuMoveIdsRef.current.delete(gameId);
+      if (isRequestCurrent()) {
+        pendingGomokuMoveIdsRef.current.delete(gameId);
+      }
     }
-  }, []);
+  }, [token, currentUserId]);
 
   const clear = useCallback((): void => {
+    sessionEpochRef.current += 1;
+    clearedSessionEpochRef.current = sessionEpochRef.current;
+    pendingGomokuMoveIdsRef.current.clear();
     dispatch({ type: "CLEAR" });
   }, []);
 

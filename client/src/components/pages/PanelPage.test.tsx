@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../test-setup";
 import { render, screen } from "@testing-library/react";
+import { useChat, type ChatContextValue } from "../../contexts/ChatContext";
 import { useDesktop, type DesktopContextValue } from "../../contexts/DesktopContext";
 import { PanelPage } from "./PanelPage";
 
@@ -10,9 +11,11 @@ import { PanelPage } from "./PanelPage";
 // ============================================================
 
 vi.mock("../../contexts/DesktopContext", () => ({ useDesktop: vi.fn() }));
+vi.mock("../../contexts/ChatContext", () => ({ useChat: vi.fn() }));
 vi.mock("./PanelContent", () => ({ PanelContent: () => <div data-testid="panel-content" /> }));
 
 const mockedUseDesktop = vi.mocked(useDesktop);
+const mockedUseChat = vi.mocked(useChat);
 
 let notifyPanelReady: ReturnType<typeof vi.fn>;
 
@@ -29,6 +32,7 @@ function mockDesktop(overrides: Partial<DesktopContextValue> = {}): void {
 beforeEach(() => {
   notifyPanelReady = vi.fn();
   mockDesktop();
+  mockedUseChat.mockReturnValue({ historyInitialized: true } as ChatContextValue);
   (window as unknown as { xiaoelongDesktop: unknown }).xiaoelongDesktop = { notifyPanelReady };
 
   // scheduleAfterNextPaint 是双层 rAF，同步执行让回执在 render 后立即触发
@@ -41,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mockedUseDesktop.mockReset();
+  mockedUseChat.mockReset();
   delete (window as unknown as { xiaoelongDesktop?: unknown }).xiaoelongDesktop;
   vi.unstubAllGlobals();
 });
@@ -71,6 +76,13 @@ describe("PanelPage 正常路径", () => {
 
 describe("PanelPage 边界条件", () => {
   it("panelRevealRequestId <= 0 时不调用 notifyPanelReady", () => {
+    render(<PanelPage />);
+    expect(notifyPanelReady).not.toHaveBeenCalled();
+  });
+
+  it("聊天历史尚未初始化时不回执 ready", () => {
+    mockDesktop({ panelRevealRequestId: 8, panelView: "home", activeTab: "chat" });
+    mockedUseChat.mockReturnValue({ historyInitialized: false } as ChatContextValue);
     render(<PanelPage />);
     expect(notifyPanelReady).not.toHaveBeenCalled();
   });
