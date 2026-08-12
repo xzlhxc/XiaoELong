@@ -1,8 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import "./styles.css";
-import "./divine-constellation.css";
+import { AppProviders } from "./AppProviders";
+import "./styles/styles.css";
+import "./styles/divine-constellation.css";
 
 const RENDER_RECOVERY_KEY = "xiaoelong_renderer_recovery_at";
 const RENDER_RECOVERY_WINDOW_MS = 60_000;
@@ -81,7 +82,9 @@ if (window.xiaoelongDesktop?.isDesktop) {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <AppRecoveryMarker />
+      <AppProviders>
+        <AppRecoveryMarker />
+      </AppProviders>
     </AppErrorBoundary>
   </React.StrictMode>
 );
