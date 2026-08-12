@@ -194,11 +194,13 @@ function getBottomRightBounds(width, height) {
 function getCenteredBounds(width, height, referenceBounds = null) {
   const display = referenceBounds ? screen.getDisplayMatching(referenceBounds) : screen.getPrimaryDisplay();
   const workArea = display.workArea;
+  const boundedWidth = Math.min(width, workArea.width);
+  const boundedHeight = Math.min(height, workArea.height);
   return {
-    x: Math.round(workArea.x + (workArea.width - width) / 2),
-    y: Math.round(workArea.y + (workArea.height - height) / 2),
-    width: Math.min(width, workArea.width),
-    height: Math.min(height, workArea.height)
+    x: Math.round(workArea.x + (workArea.width - boundedWidth) / 2),
+    y: Math.round(workArea.y + (workArea.height - boundedHeight) / 2),
+    width: boundedWidth,
+    height: boundedHeight
   };
 }
 
@@ -1335,8 +1337,11 @@ function showImageViewer(payload) {
 
   const referenceWindow = panelWindow && !panelWindow.isDestroyed() ? panelWindow : avatarWindow;
   const referenceBounds = referenceWindow && !referenceWindow.isDestroyed() ? referenceWindow.getBounds() : null;
+  const reusingViewerWindow = Boolean(imageViewerWindow && !imageViewerWindow.isDestroyed());
   const targetWindow = createImageViewerWindow(referenceBounds);
-  targetWindow.setBounds(getCenteredBounds(IMAGE_VIEWER_WIDTH, IMAGE_VIEWER_HEIGHT, referenceBounds), false);
+  if (reusingViewerWindow) {
+    targetWindow.setBounds(clampBoundsToWorkArea(targetWindow.getBounds()), false);
+  }
   targetWindow.setIgnoreMouseEvents(true);
   targetWindow.setOpacity(0);
   if (!targetWindow.isVisible()) {

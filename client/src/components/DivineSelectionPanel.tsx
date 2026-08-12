@@ -306,7 +306,7 @@ function BlessingLayer(props: { result: DeityWorshipResponse; onAccept: () => vo
 }
 
 export function DivineSelectionPanel(props: DivineSelectionPanelProps): JSX.Element {
-  const canOpenLargePreview = import.meta.env.DEV && Boolean(window.xiaoelongDesktop?.openDivineSelection);
+  const canOpenLargePreview = Boolean(window.xiaoelongDesktop?.openDivineSelection);
   const [largePreviewState, setLargePreviewState] = useState<"idle" | "opening" | "error">("idle");
 
   async function handleOpenLargePreview(): Promise<void> {
@@ -333,7 +333,7 @@ export function DivineSelectionPanel(props: DivineSelectionPanelProps): JSX.Elem
         >
           <span className="divine-dev-large-button-star" aria-hidden="true">✦</span>
           <span>
-            {largePreviewState === "opening" ? "汇聚中…" : largePreviewState === "error" ? "重试汇聚" : "星轨汇聚"}
+            {largePreviewState === "opening" ? "汇聚中…" : largePreviewState === "error" ? "重试汇聚" : "汇聚星轨"}
           </span>
         </button>
       ) : null}

@@ -237,6 +237,10 @@ const Board = memo(function Board(props: {
       ? activePendingMove.stone
       : (props.game.boardState[keyboardCell.row]?.[keyboardCell.col] ?? 0);
   const activeCellState = activeCellValue === 1 ? "黑子" : activeCellValue === 2 ? "白子" : "空位";
+  const horizontalGridInset = 50 / columnCount;
+  const verticalGridInset = 50 / rowCount;
+  const horizontalGridStep = 100 / Math.max(columnCount - 1, 1);
+  const verticalGridStep = 100 / Math.max(rowCount - 1, 1);
   const resultKind: GomokuResultKind | null =
     props.game.status === "finished" && props.game.winner
       ? props.game.winner === props.currentUserId
@@ -255,10 +259,18 @@ const Board = memo(function Board(props: {
         tabIndex={canMove && !activePendingMove ? 0 : -1}
         onClick={handleBoardClick}
         onKeyDown={handleBoardKeyDown}
-        style={{
-          backgroundSize: `${100 / columnCount}% 100%, 100% ${100 / rowCount}%`
-        }}
       >
+        <span
+          className="gomoku-board-grid"
+          aria-hidden="true"
+          style={{
+            left: `${horizontalGridInset}%`,
+            right: `${horizontalGridInset}%`,
+            top: `${verticalGridInset}%`,
+            bottom: `${verticalGridInset}%`,
+            backgroundSize: `${horizontalGridStep}% 100%, 100% ${verticalGridStep}%`
+          }}
+        />
         {renderedStones.map((stone) => (
           <span
             key={`${stone.row}-${stone.col}`}

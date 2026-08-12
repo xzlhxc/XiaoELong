@@ -53,29 +53,75 @@
     }
     button:hover { background: #fff; }
     .close {
+      position: relative;
       width: 34px;
       height: 34px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: rgba(38, 50, 56, 0.72);
       padding: 0;
-      font-size: 24px;
-      line-height: 1;
+      font-size: 0;
+    }
+    .close::before,
+    .close::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 18px;
+      height: 2px;
+      border-radius: 999px;
+      background: currentColor;
+      transform-origin: center;
+    }
+    .close::before {
+      transform: translate(-50%, -50%) rotate(45deg);
+    }
+    .close::after {
+      transform: translate(-50%, -50%) rotate(-45deg);
+    }
+    .close:hover {
+      background: transparent;
+      color: #263238;
+    }
+    .close:focus-visible {
+      outline: 2px solid rgba(53, 104, 121, 0.72);
+      outline-offset: 1px;
     }
     .stage {
       position: relative;
-      display: grid;
       min-height: 0;
-      place-items: center;
       overflow: hidden;
       border-radius: 14px;
       background: #dde3e7;
+      cursor: zoom-in;
+      touch-action: none;
+    }
+    .stage.is-zoomed {
+      cursor: grab;
+    }
+    .stage.is-dragging {
+      cursor: grabbing;
     }
     img {
+      position: absolute;
+      top: 50%;
+      left: 50%;
       display: block;
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
+      width: 0;
+      height: 0;
+      max-width: none;
+      max-height: none;
+      pointer-events: none;
+      transform: translate3d(0, 0, 0) scale(1);
+      transform-origin: top left;
+      will-change: transform;
+      -webkit-user-drag: none;
     }
     .nav {
       position: absolute;
+      z-index: 2;
       top: 50%;
       width: 44px;
       height: 44px;
@@ -108,9 +154,9 @@
   <main class="viewer">
     <header class="topbar">
       <div class="meta" id="meta"></div>
-      <button type="button" class="close" id="close" aria-label="关闭">×</button>
+      <button type="button" class="close" id="close" aria-label="关闭"></button>
     </header>
-    <section class="stage">
+    <section class="stage" id="stage">
       <button type="button" class="nav previous" id="previous" aria-label="上一张">‹</button>
       <img id="image" alt="" />
       <button type="button" class="nav next" id="next" aria-label="下一张">›</button>
@@ -120,16 +166,134 @@
   <script>
     const meta = document.getElementById("meta");
     const caption = document.getElementById("caption");
+    const stage = document.getElementById("stage");
     const image = document.getElementById("image");
     const previous = document.getElementById("previous");
     const next = document.getElementById("next");
     const close = document.getElementById("close");
+    const MIN_SCALE = 1;
+    const BASE_MAX_SCALE = 8;
+    const HARD_MAX_SCALE = 128;
     let renderVersion = 0;
+    let imageLoaded = false;
+    let scale = MIN_SCALE;
+    let offsetX = 0;
+    let offsetY = 0;
+    let baseWidth = 0;
+    let baseHeight = 0;
+    let activePointerId = null;
+    let lastPointerX = 0;
+    let lastPointerY = 0;
+
+    function clamp(value, minimum, maximum) {
+      return Math.max(minimum, Math.min(value, maximum));
+    }
+
+    function getMaximumScale() {
+      const fitWidthScale = stage.clientWidth / Math.max(1, baseWidth);
+      return Math.min(HARD_MAX_SCALE, Math.max(BASE_MAX_SCALE, fitWidthScale));
+    }
+
+    function clampOffsets() {
+      const maximumX = Math.max(0, (baseWidth * scale - stage.clientWidth) / 2);
+      const maximumY = Math.max(0, (baseHeight * scale - stage.clientHeight) / 2);
+      offsetX = clamp(offsetX, -maximumX, maximumX);
+      offsetY = clamp(offsetY, -maximumY, maximumY);
+    }
+
+    function applyView() {
+      scale = clamp(scale, MIN_SCALE, getMaximumScale());
+      if (scale <= MIN_SCALE + 0.001) {
+        scale = MIN_SCALE;
+        offsetX = 0;
+        offsetY = 0;
+      } else {
+        clampOffsets();
+      }
+      const imageX = offsetX - (baseWidth * scale) / 2;
+      const imageY = offsetY - (baseHeight * scale) / 2;
+      image.style.transform = `translate3d(${imageX}px, ${imageY}px, 0) scale(${scale})`;
+      stage.classList.toggle("is-zoomed", scale > MIN_SCALE + 0.001);
+    }
+
+    function clearImageGeometry() {
+      baseWidth = 0;
+      baseHeight = 0;
+      image.style.width = "0px";
+      image.style.height = "0px";
+    }
+
+    function fitImageToStage(reset = false) {
+      const naturalWidth = image.naturalWidth;
+      const naturalHeight = image.naturalHeight;
+      const stageWidth = stage.clientWidth;
+      const stageHeight = stage.clientHeight;
+      if (naturalWidth <= 0 || naturalHeight <= 0 || stageWidth <= 0 || stageHeight <= 0) {
+        return false;
+      }
+
+      const fitScale = Math.min(1, stageWidth / naturalWidth, stageHeight / naturalHeight);
+      baseWidth = naturalWidth * fitScale;
+      baseHeight = naturalHeight * fitScale;
+      image.style.width = `${baseWidth}px`;
+      image.style.height = `${baseHeight}px`;
+      if (reset) {
+        scale = MIN_SCALE;
+        offsetX = 0;
+        offsetY = 0;
+      }
+      applyView();
+      return true;
+    }
+
+    function endDrag(pointerId = activePointerId) {
+      if (pointerId === null || pointerId !== activePointerId) {
+        return;
+      }
+      activePointerId = null;
+      stage.classList.remove("is-dragging");
+      if (stage.hasPointerCapture(pointerId)) {
+        stage.releasePointerCapture(pointerId);
+      }
+    }
+
+    function resetView() {
+      endDrag();
+      scale = MIN_SCALE;
+      offsetX = 0;
+      offsetY = 0;
+      applyView();
+    }
+
+    function zoomAt(clientX, clientY, nextScale) {
+      const clampedScale = clamp(nextScale, MIN_SCALE, getMaximumScale());
+      if (Math.abs(clampedScale - scale) < 0.0001) {
+        return;
+      }
+
+      const stageBounds = stage.getBoundingClientRect();
+      const anchorX = clientX - (stageBounds.left + stageBounds.width / 2);
+      const anchorY = clientY - (stageBounds.top + stageBounds.height / 2);
+      const scaleRatio = clampedScale / scale;
+      offsetX = anchorX - (anchorX - offsetX) * scaleRatio;
+      offsetY = anchorY - (anchorY - offsetY) * scaleRatio;
+      scale = clampedScale;
+      applyView();
+    }
+
+    function invalidatePendingRender() {
+      renderVersion += 1;
+      image.onload = null;
+      image.onerror = null;
+    }
 
     function render(state) {
       const version = ++renderVersion;
       const images = state.images || [];
       const current = images[state.index] || null;
+      imageLoaded = false;
+      clearImageGeometry();
+      resetView();
       previous.style.display = images.length > 1 ? "inline-grid" : "none";
       next.style.display = images.length > 1 ? "inline-grid" : "none";
       image.onload = null;
@@ -160,7 +324,10 @@
             return;
           }
           if (loaded) {
-            image.style.visibility = "visible";
+            imageLoaded = fitImageToStage(true);
+            if (imageLoaded) {
+              image.style.visibility = "visible";
+            }
           }
           window.xiaoelongImageViewer.ready(state.requestId);
         };
@@ -180,16 +347,101 @@
       }
     }
 
-    previous.addEventListener("click", () => window.xiaoelongImageViewer.previous());
-    next.addEventListener("click", () => window.xiaoelongImageViewer.next());
-    close.addEventListener("click", () => window.xiaoelongImageViewer.close());
+    function switchImage(direction) {
+      invalidatePendingRender();
+      imageLoaded = false;
+      clearImageGeometry();
+      resetView();
+      image.style.visibility = "hidden";
+      image.removeAttribute("src");
+      window.xiaoelongImageViewer[direction]();
+    }
+
+    function closeViewer() {
+      invalidatePendingRender();
+      imageLoaded = false;
+      clearImageGeometry();
+      resetView();
+      image.style.visibility = "hidden";
+      image.removeAttribute("src");
+      window.xiaoelongImageViewer.close();
+    }
+
+    stage.addEventListener("wheel", (event) => {
+      if (!imageLoaded || (event.target instanceof Element && event.target.closest("button"))) {
+        return;
+      }
+      event.preventDefault();
+      const normalizedDelta = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * stage.clientHeight
+          : event.deltaY;
+      zoomAt(event.clientX, event.clientY, scale * Math.exp(-normalizedDelta * 0.0015));
+    }, { passive: false });
+
+    stage.addEventListener("pointerdown", (event) => {
+      if (
+        !imageLoaded ||
+        activePointerId !== null ||
+        scale <= MIN_SCALE + 0.001 ||
+        event.button !== 0 ||
+        (event.target instanceof Element && event.target.closest("button"))
+      ) {
+        return;
+      }
+      activePointerId = event.pointerId;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      stage.setPointerCapture(event.pointerId);
+      stage.classList.add("is-dragging");
+      event.preventDefault();
+    });
+
+    stage.addEventListener("pointermove", (event) => {
+      if (event.pointerId !== activePointerId) {
+        return;
+      }
+      offsetX += event.clientX - lastPointerX;
+      offsetY += event.clientY - lastPointerY;
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+      applyView();
+    });
+
+    stage.addEventListener("pointerup", (event) => endDrag(event.pointerId));
+    stage.addEventListener("pointercancel", (event) => endDrag(event.pointerId));
+    stage.addEventListener("lostpointercapture", (event) => endDrag(event.pointerId));
+    window.addEventListener("resize", () => {
+      if (imageLoaded) {
+        fitImageToStage(false);
+      }
+    });
+
+    previous.addEventListener("click", () => switchImage("previous"));
+    next.addEventListener("click", () => switchImage("next"));
+    close.addEventListener("click", closeViewer);
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        window.xiaoelongImageViewer.close();
+        event.preventDefault();
+        closeViewer();
       } else if (event.key === "ArrowLeft") {
-        window.xiaoelongImageViewer.previous();
+        event.preventDefault();
+        switchImage("previous");
       } else if (event.key === "ArrowRight") {
-        window.xiaoelongImageViewer.next();
+        event.preventDefault();
+        switchImage("next");
+      } else if (imageLoaded && (event.key === "+" || event.key === "=" || event.code === "NumpadAdd")) {
+        event.preventDefault();
+        const stageBounds = stage.getBoundingClientRect();
+        zoomAt(stageBounds.left + stageBounds.width / 2, stageBounds.top + stageBounds.height / 2, scale * 1.25);
+      } else if (imageLoaded && (event.key === "-" || event.key === "_" || event.code === "NumpadSubtract")) {
+        event.preventDefault();
+        const stageBounds = stage.getBoundingClientRect();
+        zoomAt(stageBounds.left + stageBounds.width / 2, stageBounds.top + stageBounds.height / 2, scale / 1.25);
+      } else if (imageLoaded && (event.key === "0" || event.code === "Numpad0")) {
+        event.preventDefault();
+        resetView();
       }
     });
     window.xiaoelongImageViewer.onStateChange(render);
