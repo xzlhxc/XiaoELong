@@ -1020,9 +1020,9 @@ function createPanelWindow() {
   panelWindow.webContents.on("render-process-gone", (_event, details) => {
     schedulePanelRecovery(`renderer ${details.reason}`);
   });
-  panelWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    if (level >= 2) {
-      console.error(`[Electron][Panel] ${message} (${sourceId}:${line})`);
+  panelWindow.webContents.on("console-message", ({ level, message, lineNumber, sourceId }) => {
+    if (level === "error") {
+      console.error(`[Electron][Panel] ${message} (${sourceId}:${lineNumber})`);
     }
   });
   panelWindow.on("unresponsive", () => {

@@ -1,22 +1,28 @@
 # 小鳄龙桌面组件
 
-小鳄龙是一个给固定小群使用的 Windows/macOS 桌面伴侣。它用 Electron 提供桌面悬浮入口，React/Vite 渲染界面，Express + Socket.io 提供鉴权、聊天、每日问题、心情和五子棋服务，MySQL 持久化数据。
+[![macOS 构建](https://github.com/sheephjc/XiaoELong/actions/workflows/build-macos.yml/badge.svg)](https://github.com/sheephjc/XiaoELong/actions/workflows/build-macos.yml)
 
-当前版本：`2.0.1`
+小鳄龙是一个给固定小群使用的 Windows/macOS 桌面伴侣。它用 Electron 提供桌面悬浮入口，React/Vite 渲染界面，Express + Socket.io 提供前后端连接。后端采用 MySQL 持久化数据。目前主要功能包括：聊天室、每日问题、每日心情、膜拜、五子棋等。
 
-## 2.0.1 更新要点
+当前版本：`2.1.0`
 
-- 每日心情会在北京时间早上 8 点跨日后自动刷新，电脑无需重启。
-- 修复重复打开图片查看器时短暂显示上一张图片的问题。
-- 聊天新增右键引用消息，支持引用预览、历史记录与跳转原消息。
-- 优化设置面板滚动条、状态栏姓名宽度和心情面板边界。
-- 引用消息涉及后端和数据库结构升级；本次只发布 Windows 客户端，macOS 仍保持 `2.0.0`。
+## 2.1.0 更新要点
 
-## 2.0.0 更新要点
+- 前端架构重构
+- 仓库目录优化整理
+- 新增前端测试
+- Electron 依赖升级
+- 新增开发文档
 
-- 修复选择今日心情后透明桌宠窗口重新缩放导致的闪屏。
-- 未保存显示偏好的用户默认使用“只显示形象”；已经明确选择过显示模式的用户继续沿用原设置。
-- 本次没有后端接口或数据库结构变更。
+（详细见 [版本历史](CHANGELOG.md) ）
+
+## 文档
+
+- [需求文档](docs/requirements.md) — 产品定位、功能与非功能需求、路线图
+- [架构文档](docs/architecture.md) — 系统架构、数据流、通信协议
+- [文件清单](docs/file-inventory.md) — 全量文件用途说明
+- [服务器部署说明](deploy/server/README-SERVER.md) — 宝塔 Windows 面板部署与更新
+- [版本历史](CHANGELOG.md) — 各版本更新记录
 
 ## 技术栈
 
@@ -124,11 +130,11 @@ npm.cmd run dev:client
 npm.cmd run dev:desktop
 ```
 
-`dev:client` / `dev:desktop` 会强制使用 `http://localhost:3001`，用于本地联调；正式客户端打包脚本会强制使用公网服务 `http://43.139.223.204:3001`。
+`dev:client` / `dev:desktop` 会强制使用 `http://localhost:3001`，用于本地联调；正式客户端打包脚本会强制使用公网服务。
 
 开发版使用独立的 `XiaoELong-dev` 用户数据目录，不会覆盖正式版登录信息，也不会修改正式版的开机自启动设置。
 
-## DeepSeek 诊断
+## DeepSeek 诊断（每日一题）
 
 配置好 `server/.env` 并完成构建后，可以执行一次不会写入数据库的 DeepSeek 诊断：
 
@@ -191,7 +197,7 @@ npm.cmd run electron:dist
 npm run electron:dist:mac
 ```
 
-该命令会在 `release/` 下生成 `XiaoELong-2.0.0-mac-universal.dmg`、`XiaoELong-2.0.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.0.0-mac-universal` 的 Actions 产物。
+该命令会在 `release/` 下生成 `XiaoELong-2.1.0-mac-universal.dmg`、`XiaoELong-2.1.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.1.0-mac-universal` 的 Actions 产物。
 
 下载并解压 Actions 产物后，可在 macOS 终端校验安装包：
 
@@ -213,7 +219,7 @@ xattr -dr com.apple.quarantine /Applications/XiaoELong.app
 - 浏览器下载完成后，完全退出旧版 XiaoELong，打开 DMG，将应用拖入“应用程序”并选择替换，再重新打开。登录信息和本机设置保存在用户数据目录中，正常覆盖应用不会清除它们。
 - 这是“检查版本 + 打开可信下载链接”，不是静默自动安装；未签名应用若要使用 Electron 的完整自动更新，仍需 Apple Developer 证书、签名和公证。
 - 已经发出的 `1.3.1` 不包含检查逻辑，必须手动安装一次 `1.3.2` 或更新版本；从 `1.3.2` 开始才会提示后续版本。
-- 发布时将 DMG 上传到标签为 `v2.0.0` 的 GitHub Release，再把 Actions 生成的 `latest-mac.json` 上传到服务器更新目录。不要上传 `latest-mac.yml`，它不用于当前的 Mac 手动更新流程。
+- 发布时将 DMG 上传到标签为 `v2.1.0` 的 GitHub Release，再把 Actions 生成的 `latest-mac.json` 上传到服务器更新目录。不要上传 `latest-mac.yml`，它不用于当前的 Mac 手动更新流程。
 - Windows 自动更新不受影响。若用户网络无法访问 GitHub，仍可直接向其发送 DMG。
 
 `build` 会先运行 `clean`，避免旧的 `dist` 文件混入发布产物。
@@ -223,7 +229,7 @@ xattr -dr com.apple.quarantine /Applications/XiaoELong.app
 - 邀请码入群：用户输入邀请码、昵称、可选头像后获得 JWT。
 - 会话恢复：客户端保存 token，启动后通过 `GET /api/auth/me` 恢复身份。
 - 在线状态：Socket 握手校验 token，服务端维护多窗口在线状态。
-- 实时聊天：文字、图片和普通文件附件，历史消息从数据库加载。
+- 实时聊天：文字、图片和普通文件附件，历史消息从数据库加载；支持右键引用消息、引用预览与跳转原消息。
 - 每日心情：每日选择一次心情，在线成员实时同步。
 - 每日问题：每天一道大学生向四选一题，支持 DeepSeek 生成、本地 fallback、逻辑/语文常识权重控制和结构化附图模板。
 - 五子棋：邀请、接受、落子、胜负判定和实时更新。

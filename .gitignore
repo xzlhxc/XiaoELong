@@ -21,5 +21,14 @@ server/uploads/avatars/*
 server/uploads/chat-files/*
 server/uploads/chat-images/*
 !server/uploads/avatars/.gitkeep
+# dev 模式 cwd=server/，上传文件落在 server/ 下的运行时目录
+server/avatars/
+server/chat-files/
+server/chat-images/
 
 .DS_Store
+
+# 本地临时文档
+doc/
+CLAUDE.md
+.claude

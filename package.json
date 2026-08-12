@@ -1,6 +1,7 @@
 {
   "name": "xiaoelong-monorepo",
-  "version": "2.0.1",
+  "version": "2.1.0",
+  "license": "MIT",
   "private": true,
   "workspaces": [
     "client",
@@ -12,13 +13,14 @@
     "test": "vitest run",
     "dev:server": "cross-env NODE_ENV=development npm run dev --workspace server",
     "dev:client": "cross-env VITE_SERVER_URL=http://localhost:3001 npm run dev --workspace client",
-    "dev:desktop": "concurrently \"npm run dev:server\" \"npm run dev:client\" \"wait-on tcp:5173 && node scripts/dev-electron.mjs\"",
+    "dev:desktop": "npm run build --workspace shared && concurrently \"npm run dev:server\" \"npm run dev:client\" \"wait-on tcp:5173 && node scripts/dev-electron.mjs\"",
     "build": "npm run build:cloud",
     "build:local": "npm run clean && npm run build --workspace shared && npm run build --workspace server && cross-env VITE_SERVER_URL=http://localhost:3001 npm run build --workspace client",
     "build:cloud": "npm run clean && npm run build --workspace shared && npm run build --workspace server && cross-env VITE_SERVER_URL=http://43.139.223.204:3001 npm run build --workspace client",
     "db:init": "npm run db:init --workspace server",
     "deepseek:check": "npm run build --workspace shared && npm run build --workspace server && npm run deepseek:check --workspace server",
     "mac:update-manifest": "node scripts/create-mac-update-manifest.mjs",
+    "server:deploy": "npm run build --workspace shared && npm run build --workspace server && node scripts/build-server-deploy.mjs",
     "electron:pack": "npm run build:cloud && electron-builder --dir",
     "electron:dist": "npm run build:cloud && electron-builder --win nsis --publish never",
     "electron:dist:mac": "npm run build:cloud && electron-builder --mac dmg zip --universal --publish never && npm run mac:update-manifest"
@@ -27,8 +29,8 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "electron": "^31.7.7",
-    "electron-builder": "^24.13.3",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
     "vitest": "^2.1.9",
     "wait-on": "^8.0.3"
   },
