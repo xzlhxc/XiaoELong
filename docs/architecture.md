@@ -241,7 +241,7 @@ Electron Main Process (main.js)
 - **6 个 Context**（`contexts/`，各持 `useReducer` + `useContext`，配套 Socket 订阅/分流）：
   - `DesktopContext`：桌面窗口状态、桌宠显示
   - `AuthContext`：认证、用户资料
-  - `ChatContext`：聊天消息、上传、Socket 订阅
+  - `ChatContext`：聊天消息、上传、Socket 订阅，以及重连/网络恢复后的会话隔离补拉
   - `DailyContext`：每日一题、每日心情，以及保留当前内容的刷新状态
   - `DeityContext`：神选膜拜
   - `GomokuContext`：五子棋对局、落子/撤回互斥、无闪刷新与 Socket 事件分流
@@ -613,7 +613,7 @@ npm run electron:dist:mac → macOS DMG + ZIP（universal）
 | **分层清晰** | Routes → Services → DB 三层分离，业务逻辑可独立测试 |
 | **安全防护** | JWT 认证、sanitize-html 防 XSS、multer 文件类型校验、zod 输入校验 |
 | **并发安全** | 五子棋落子与撤回使用数据库行锁 + 事务保证并发正确性 |
-| **容错设计** | DeepSeek 失败自动 fallback 到本地题库；面板渲染崩溃自动恢复；Socket 断线提示 |
+| **容错设计** | DeepSeek 失败自动 fallback 到本地题库；面板渲染崩溃自动恢复；Socket 断线提示并在恢复后合并补拉聊天记录 |
 | **防闪烁** | 窗口采用 stage → reveal 两阶段显示；五子棋与每日一题刷新保留旧内容并稳定展示进度 |
 | **幂等迁移** | 数据库 SQL 使用条件式 DDL，支持安全重复执行 |
 

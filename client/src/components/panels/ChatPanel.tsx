@@ -174,6 +174,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   );
   const renderedMessagesRef = useRef(renderedMessages);
   renderedMessagesRef.current = renderedMessages;
+  const knownMessageIdsRef = useRef<Set<number>>(new Set());
   const imageMessages = useMemo(
     () =>
       renderedMessages.flatMap((message) =>
@@ -531,6 +532,9 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
 
   useLayoutEffect(() => {
     const latestMessage = renderedMessages[renderedMessages.length - 1] ?? null;
+    const knownMessageIds = knownMessageIdsRef.current;
+    const newlyRenderedMessages = renderedMessages.filter((message) => !knownMessageIds.has(message.id));
+    knownMessageIdsRef.current = new Set(renderedMessages.map((message) => message.id));
 
     if (coldStartScrollRef.current && !startupBaselineInitializedRef.current && latestMessage) {
       startupBaselineInitializedRef.current = true;
@@ -621,27 +625,30 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
       return;
     }
 
-    if (latestMessage.id === previousLastId) {
+    if (latestMessage.id === previousLastId && newlyRenderedMessages.length === 0) {
       return;
     }
 
-    const previousLastIndex = previousLastId === null
-      ? -1
-      : renderedMessages.findIndex((message) => message.id === previousLastId);
-    const addedMessages = previousLastIndex >= 0
-      ? renderedMessages.slice(previousLastIndex + 1)
-      : [latestMessage];
+    const addedMessages = newlyRenderedMessages;
     lastMessageIdRef.current = latestMessage.id;
+
+    if (addedMessages.length === 0) {
+      captureScrollMemory();
+      return;
+    }
+
+    const insertedBeforePreviousTail = previousLastId !== null
+      && addedMessages.some((message) => message.id <= previousLastId);
+    if (insertedBeforePreviousTail && scrollMemoryRef.current) {
+      restoreScrollPosition(scrollMemoryRef.current);
+    }
 
     const externalAddedMessages = addedMessages.filter((message) => message.user.id !== currentUserId);
     if (!panelVisibleRef.current && externalAddedMessages.length > 0) {
-      const firstUnreadMessageId = firstUnreadMessageIdRef.current ?? externalAddedMessages[0].id;
-      const firstUnreadIndex = renderedMessages.findIndex((message) => message.id === firstUnreadMessageId);
-      const unreadCount = firstUnreadIndex >= 0
-        ? renderedMessages
-            .slice(firstUnreadIndex)
-            .filter((message) => message.user.id !== currentUserId).length
-        : unreadCountRef.current + externalAddedMessages.length;
+      const firstUnreadMessageId = firstUnreadMessageIdRef.current === null
+        ? externalAddedMessages[0].id
+        : Math.min(firstUnreadMessageIdRef.current, externalAddedMessages[0].id);
+      const unreadCount = unreadCountRef.current + externalAddedMessages.length;
       isAtBottomRef.current = false;
       setHiddenUnreadState(firstUnreadMessageId, unreadCount);
       captureScrollMemory();
@@ -660,13 +667,10 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
       return;
     }
 
-    const firstLiveMessageId = firstLiveNewMessageIdRef.current ?? externalAddedMessages[0].id;
-    const firstLiveMessageIndex = renderedMessages.findIndex((message) => message.id === firstLiveMessageId);
-    const liveMessageCount = firstLiveMessageIndex >= 0
-      ? renderedMessages
-          .slice(firstLiveMessageIndex)
-          .filter((message) => message.user.id !== currentUserId).length
-      : liveNewMessageCountRef.current + externalAddedMessages.length;
+    const firstLiveMessageId = firstLiveNewMessageIdRef.current === null
+      ? externalAddedMessages[0].id
+      : Math.min(firstLiveNewMessageIdRef.current, externalAddedMessages[0].id);
+    const liveMessageCount = liveNewMessageCountRef.current + externalAddedMessages.length;
     setLiveNewMessageState(firstLiveMessageId, liveMessageCount);
     captureScrollMemory();
   }, [renderedMessages, currentUserId, scrollMemoryRef]);

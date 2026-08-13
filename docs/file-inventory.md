@@ -119,7 +119,7 @@ XiaoELong/
 | `client/src/contexts/DesktopContext.tsx` | ~505 | 桌面窗口状态：desktopRole、窗口显示、桌宠显示模式 |
 | `client/src/contexts/AuthContext.tsx` | ~860 | 认证：登录/登出、资料更新、自动续签和多窗口会话对账 |
 | `client/src/contexts/DeityContext.tsx` | ~475 | 神选膜拜：列表、段位、膜拜状态及续签时请求失效保护 |
-| `client/src/contexts/ChatContext.tsx` | ~466 | 聊天：消息、引用、附件、Socket 订阅及条件会话失效 |
+| `client/src/contexts/ChatContext.tsx` | ~520 | 聊天：消息、引用、附件、Socket 订阅、重连补拉及条件会话失效 |
 | `client/src/contexts/GomokuContext.tsx` | ~578 | 五子棋：对局状态、落子/撤回互斥、无闪刷新、Socket 分流及续签时请求失效保护 |
 | `client/src/contexts/DailyContext.tsx` | ~471 | 每日一题 + 每日心情：题目、答题、心情选择、静默轮询与无闪刷新状态 |
 
@@ -150,7 +150,7 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `client/src/components/panels/ChatPanel.tsx` | ~1071 | 聊天面板：消息列表、文字输入、图片/文件上传、右键引用、滚动到底 |
+| `client/src/components/panels/ChatPanel.tsx` | ~1085 | 聊天面板：消息列表、文字输入、图片/文件上传、右键引用、补拉消息的未读与滚动锚点、滚动到底 |
 | `client/src/components/panels/DivineSelectionPanel.tsx` | ~461 | 神选膜拜面板：七位神明卡片、段位展示、膜拜按钮 |
 | `client/src/components/panels/GomokuPanel.tsx` | ~452 | 五子棋面板：对局列表、棋盘渲染、落子/撤回交互、邀请选择及刷新状态 |
 | `client/src/components/panels/DailyQuestionPanel.tsx` | ~389 | 每日一题面板：题目展示（含可视化附图）、四选一、统计柱状图、答案揭晓及保留内容的刷新状态 |

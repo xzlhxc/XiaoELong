@@ -2990,7 +2990,6 @@ button:disabled {
 
 .gomoku-board-wrap.victory .gomoku-board {
   border-color: #e5b93f;
-  animation: gomoku-victory-board 820ms ease-out 2 alternate;
   box-shadow:
     0 0 0 3px rgba(255, 224, 119, 0.28),
     0 0 22px rgba(245, 177, 48, 0.3);
@@ -3151,11 +3150,6 @@ button:disabled {
 .gomoku-defeat-drop-6 { left: 86%; animation-delay: 0.44s; }
 .gomoku-defeat-drop-7 { left: 96%; animation-delay: 0.12s; }
 
-@keyframes gomoku-victory-board {
-  from { transform: scale(1); }
-  to { transform: scale(1.012); }
-}
-
 @keyframes gomoku-defeat-board {
   0%, 100% { transform: translateX(0); filter: saturate(1); }
   28% { transform: translateX(-3px); filter: saturate(0.72); }
@@ -3222,7 +3216,6 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gomoku-board-wrap.victory .gomoku-board,
   .gomoku-board-wrap.defeat .gomoku-board {
     animation: none;
   }
