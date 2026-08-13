@@ -238,6 +238,24 @@ describe("chatReducer 正常路径", () => {
     expect(next.historyInitialized).toBe(true);
   });
 
+  it("MERGE_MESSAGES 合并补漏并按 id 升序（中间遗漏消息补回）", () => {
+    const state = makeState({ messages: [makeMessage(1), makeMessage(3)] });
+    const next = chatReducer(state, { type: "MERGE_MESSAGES", payload: [makeMessage(2)] });
+    expect(next.messages.map((m) => m.id)).toEqual([1, 2, 3]);
+  });
+
+  it("MERGE_MESSAGES 去重：重复 id 不出现两次", () => {
+    const state = makeState({ messages: [makeMessage(1), makeMessage(2)] });
+    const next = chatReducer(state, { type: "MERGE_MESSAGES", payload: [makeMessage(2), makeMessage(3)] });
+    expect(next.messages.map((m) => m.id)).toEqual([1, 2, 3]);
+  });
+
+  it("MERGE_MESSAGES 同 id 用服务器最新数据覆盖", () => {
+    const state = makeState({ messages: [makeMessage(1, "u1", "旧内容")] });
+    const next = chatReducer(state, { type: "MERGE_MESSAGES", payload: [makeMessage(1, "u1", "新内容")] });
+    expect(next.messages).toEqual([makeMessage(1, "u1", "新内容")]);
+  });
+
   it("ADD_MESSAGE 追加一条消息到末尾", () => {
     const state = makeState({ messages: [makeMessage(1)] });
     const next = chatReducer(state, { type: "ADD_MESSAGE", payload: makeMessage(2) });
@@ -675,6 +693,73 @@ describe("Provider / 状态转换", () => {
     }
   });
 
+});
+
+// ============================================================
+// 重连 / 网络恢复补拉
+// ============================================================
+
+describe("重连 / 网络恢复补拉", () => {
+  it("首次 connect 不补拉（历史由 loadChatHistory 负责）", async () => {
+    await renderChat();
+    expect(apiMock.getRecentMessages).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      socketMock.getShared()!._trigger("connect", undefined);
+    });
+    await act(async () => {});
+    expect(apiMock.getRecentMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("重连（第二次 connect）→ 补拉历史并合并遗漏消息", async () => {
+    apiMock.getRecentMessages.mockResolvedValueOnce({ messages: [makeMessage(1)] });
+    const { result } = await renderChat();
+    expect(result.current.messages).toEqual([makeMessage(1)]);
+
+    act(() => {
+      socketMock.getShared()!._trigger("connect", undefined);
+    });
+
+    apiMock.getRecentMessages.mockResolvedValueOnce({ messages: [makeMessage(1), makeMessage(2)] });
+    act(() => {
+      socketMock.getShared()!._trigger("connect", undefined);
+    });
+    await act(async () => {});
+
+    expect(apiMock.getRecentMessages).toHaveBeenCalledTimes(2);
+    expect(result.current.messages.map((m) => m.id)).toEqual([1, 2]);
+  });
+
+  it("online 事件 → 补拉历史并合并", async () => {
+    apiMock.getRecentMessages.mockResolvedValueOnce({ messages: [makeMessage(1)] });
+    const { result } = await renderChat();
+
+    apiMock.getRecentMessages.mockResolvedValueOnce({ messages: [makeMessage(1), makeMessage(2)] });
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await act(async () => {});
+
+    expect(apiMock.getRecentMessages).toHaveBeenCalledTimes(2);
+    expect(result.current.messages.map((m) => m.id)).toEqual([1, 2]);
+  });
+
+  it("avatar 角色重连不补拉", async () => {
+    mockDesktop("avatar");
+    await renderChat();
+    expect(apiMock.getRecentMessages).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      socketMock.getShared()!._trigger("connect", undefined);
+    });
+    await act(async () => {});
+    act(() => {
+      socketMock.getShared()!._trigger("connect", undefined);
+    });
+    await act(async () => {});
+
+    expect(apiMock.getRecentMessages).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ============================================================

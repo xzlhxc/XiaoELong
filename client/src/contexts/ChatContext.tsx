@@ -55,6 +55,7 @@ export type ChatAction =
   | { type: "START_HISTORY" }
   | { type: "SET_MESSAGES"; payload: ChatMessage[] }
   | { type: "SET_HISTORY_INITIALIZED"; payload: boolean }
+  | { type: "MERGE_MESSAGES"; payload: ChatMessage[] }
   | { type: "ADD_MESSAGE"; payload: ChatMessage }
   | { type: "SET_PRESENCE_USERS"; payload: PresenceUser[] }
   | { type: "UPDATE_PRESENCE_ONLINE"; payload: PresenceDeltaPayload }
@@ -85,6 +86,21 @@ function dedupeMessages(messages: ChatMessage[]): ChatMessage[] {
     deduped.push(message);
   }
   return deduped;
+}
+
+/**
+ * 合并两组消息：按 id 去重（后者覆盖前者，取服务器最新数据），并按 id 升序排序。
+ * 用于重连/网络恢复后补拉历史，把断线期间遗漏的消息补回现有列表，同时不截断已有历史。
+ */
+function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const byId = new Map<number, ChatMessage>();
+  for (const message of current) {
+    byId.set(message.id, message);
+  }
+  for (const message of incoming) {
+    byId.set(message.id, message);
+  }
+  return Array.from(byId.values()).sort((a, b) => a.id - b.id);
 }
 
 function updatePresenceStatus(current: PresenceUser[], onlineUserIds: string[]): PresenceUser[] {
@@ -169,6 +185,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_HISTORY_INITIALIZED":
       return { ...state, historyInitialized: action.payload };
+
+    case "MERGE_MESSAGES":
+      return { ...state, messages: mergeMessages(state.messages, action.payload) };
 
     case "ADD_MESSAGE":
       return { ...state, messages: dedupeMessages([...state.messages, action.payload]) };
@@ -298,9 +317,31 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     const socket = getOrCreateSocket(token);
+    let hasConnected = false;
+    let resyncInFlight = false;
+
+    // 补拉最近历史并合并：用于重连/网络恢复后补齐断线期间遗漏的消息
+    const resyncRecentMessages = async (): Promise<void> => {
+      if (resyncInFlight) {
+        return;
+      }
+      resyncInFlight = true;
+      try {
+        const history = await getRecentMessages(token, 50);
+        dispatch({ type: "MERGE_MESSAGES", payload: history.messages });
+      } catch {
+        // 补拉失败静默忽略，保留现有消息；下次重连或网络恢复会再次尝试。
+      } finally {
+        resyncInFlight = false;
+      }
+    };
 
     const handleConnect = (): void => {
       dispatch({ type: "SET_SOCKET_ERROR", payload: null });
+      if (desktopRole !== "avatar" && hasConnected) {
+        void resyncRecentMessages();
+      }
+      hasConnected = true;
     };
     const handleConnectError = (): void => {
       dispatch({ type: "SET_SOCKET_ERROR", payload: "实时连接失败，请稍后重试。" });
@@ -327,6 +368,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const handleChatMessage = (message: ChatMessage): void => {
       dispatch({ type: "ADD_MESSAGE", payload: message });
     };
+    const handleOnline = (): void => {
+      void resyncRecentMessages();
+    };
 
     socket.on("connect", handleConnect);
     socket.on("connect_error", handleConnectError);
@@ -339,6 +383,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     if (desktopRole !== "avatar") {
       socket.on("chat:message", handleChatMessage);
+      window.addEventListener("online", handleOnline);
     }
 
     return () => {
@@ -352,6 +397,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       socket.off("mood:update", handleMoodUpdate);
       if (desktopRole !== "avatar") {
         socket.off("chat:message", handleChatMessage);
+        window.removeEventListener("online", handleOnline);
       }
     };
   }, [token, currentUserId, desktopRole]);
