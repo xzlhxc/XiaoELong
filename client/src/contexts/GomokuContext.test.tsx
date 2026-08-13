@@ -145,6 +145,7 @@ function makeGame(overrides?: Partial<GomokuGame>): GomokuGame {
     playerWhite: makeUser("u2", "白方"),
     currentTurn: "u1",
     winner: null,
+    undoAvailableTo: null,
     boardState: Array.from({ length: 15 }, () => Array(15).fill(0)),
     invitedBy: "u1",
     createdAt: "2026-08-11T00:00:00.000Z",
@@ -378,6 +379,15 @@ describe("handler 错误路径", () => {
     expect(result.current.error).toBe("连接未建立，无法落子。");
   });
 
+  it("undo 无连接 → 返回 false + SET_ERROR", async () => {
+    mockDesktop("panel");
+    const { result } = await renderGomoku();
+    socketMock.setShared(null);
+    const res = await act(async () => result.current.undo(1));
+    expect(res).toBe(false);
+    expect(result.current.error).toBe("连接未建立，无法撤回落子。");
+  });
+
   // C16. emitWithAck 超时（8s）→ SET_ERROR + move 返回 false
   it("emitWithAck 超时（8s）→ SET_ERROR + move 返回 false", async () => {
     vi.useFakeTimers();
@@ -472,6 +482,20 @@ describe("handler 成功路径", () => {
     expect(result.current.games).toContainEqual(afterMove);
   });
 
+  it("undo 成功 → emit gomoku:undo + UPSERT + 返回 true", async () => {
+    mockDesktop("panel");
+    const { result } = await renderGomoku();
+    const afterUndo = makeGame({ id: 1, currentTurn: "u1", undoAvailableTo: null });
+    await act(async () => {
+      const p = result.current.undo(1);
+      socketMock.getLastAck()!({ ok: true, game: afterUndo });
+      expect(await p).toBe(true);
+    });
+    expect(socketMock.emitCalls[0].event).toBe("gomoku:undo");
+    expect(socketMock.emitCalls[0].payload).toEqual({ gameId: 1 });
+    expect(result.current.games).toContainEqual(afterUndo);
+  });
+
   // C19. move 失败（ack !ok）→ SET_ERROR + 锁释放，可再次 move
   it("move 失败后锁释放 → 可再次 move", async () => {
     mockDesktop("panel");
@@ -507,6 +531,20 @@ describe("Provider 状态转换 + Socket 分流", () => {
     });
     expect(await p2!).toBe(false);
     expect(socketMock.emitCalls.filter((c) => c.event === "gomoku:move")).toHaveLength(1);
+  });
+
+  it("同局 move 挂起时 undo 被互斥锁拒绝", async () => {
+    mockDesktop("panel");
+    const { result } = await renderGomoku();
+    let undoResult: Promise<boolean>;
+    act(() => {
+      void result.current.move(1, 0, 0);
+      undoResult = result.current.undo(1);
+    });
+    expect(await undoResult!).toBe(false);
+    expect(socketMock.emitCalls).toEqual([
+      { event: "gomoku:move", payload: { gameId: 1, row: 0, col: 0 } }
+    ]);
   });
 
   // D21. 登出（token → null）→ CLEAR，状态回初始

@@ -70,6 +70,11 @@ interface Window {
     readonly notifyLogin?: (token: string) => void;
     readonly getPersistedAccessToken?: () => string | null;
     readonly persistAccessToken?: (token: string) => void;
+    readonly refreshAccessToken?: (
+      expectedToken: string,
+      renewedToken: string
+    ) => Promise<string | null>;
+    readonly invalidateAccessToken?: (expectedToken: string) => Promise<string | null>;
     readonly clearPersistedAccessToken?: () => void;
     readonly hideAllWindows?: () => void;
     readonly setMoodPromptVisible?: (visible: boolean) => void;
@@ -111,6 +116,9 @@ interface Window {
     readonly onSettingsChange?: (callback: (settings: XiaoELongDesktopSettings) => void) => () => void;
     readonly onLogout?: (callback: () => void) => () => void;
     readonly onLogin?: (callback: (token: string) => void) => () => void;
+    readonly onAccessTokenRefresh?: (
+      callback: (payload: { expectedToken: string; renewedToken: string }) => void
+    ) => () => void;
     readonly onPlacementChange?: (
       callback: (placement: "upper-left" | "upper-right" | "lower-left" | "lower-right") => void
     ) => () => void;

@@ -10,6 +10,7 @@ import type { GomokuGame, UserProfile } from "@xiaoelong/shared";
 import { useAuth } from "../../contexts/AuthContext";
 import { useChat } from "../../contexts/ChatContext";
 import { useGomoku } from "../../contexts/GomokuContext";
+import { RefreshStatus, useRefreshFeedback } from "../atoms/RefreshStatus";
 import { UserAvatar } from "../atoms/UserAvatar";
 
 function getOpponent(game: GomokuGame, userId: string): UserProfile {
@@ -298,14 +299,17 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
   const { presenceUsers: users } = useChat();
   const {
     games, selectedGameId, loading, error,
-    selectGame, invite, accept, reject, move, refresh
+    selectGame, invite, accept, reject, move, undo, refresh
   } = useGomoku();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
+  const [undoingGameId, setUndoingGameId] = useState<number | null>(null);
+  const { isRefreshing, runRefresh } = useRefreshFeedback(refresh, loading);
   const selectedGame = useMemo(
     () => games.find((game) => game.id === selectedGameId) ?? games[0] ?? null,
     [games, selectedGameId]
   );
+  const canUndoSelectedGame = selectedGame?.undoAvailableTo === currentUser?.id;
 
   const inviteCandidates = useMemo(() => {
     if (!currentUser) {
@@ -340,11 +344,24 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
     }
   }
 
+  async function handleUndo(gameId: number): Promise<void> {
+    if (undoingGameId !== null) {
+      return;
+    }
+    setUndoingGameId(gameId);
+    try {
+      await undo(gameId);
+    } finally {
+      setUndoingGameId(null);
+    }
+  }
+
   return (
     <section className="module-card gomoku-card">
       <div className="module-head">
         <h2>五子棋</h2>
         <div className="gomoku-actions">
+          <RefreshStatus active={isRefreshing} />
           <div className="invite-popover-wrap">
             <button type="button" className="primary-soft-button" onClick={() => setInviteOpen((open) => !open)}>
               邀请
@@ -379,7 +396,12 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
               </div>
             ) : null}
           </div>
-          <button type="button" className="ghost-button" onClick={() => void refresh()}>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={isRefreshing}
+            onClick={() => void runRefresh()}
+          >
             刷新
           </button>
         </div>
@@ -389,8 +411,7 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
         <aside className="gomoku-left">
           <h3>我的对局</h3>
           <div className="gomoku-game-list">
-            {loading ? <p className="muted-text">加载中...</p> : null}
-            {!loading && games.length === 0 ? <p className="muted-text">还没有对局。</p> : null}
+            {games.length === 0 ? <p className="muted-text">还没有对局。</p> : null}
             {games.map((game) => {
               const opponent = getOpponent(game, currentUser.id);
               const selected = selectedGame?.id === game.id;
@@ -414,8 +435,20 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
           {selectedGame ? (
             <>
               <div className="gomoku-game-head">
-                <strong>{`对手：${getOpponent(selectedGame, currentUser.id).nickname}，你执${getPlayerColor(selectedGame, currentUser.id)}`}</strong>
-                <em>{formatStatus(selectedGame, currentUser.id)}</em>
+                <strong>{`你执${getPlayerColor(selectedGame, currentUser.id)}`}</strong>
+                <div className="gomoku-undo-slot">
+                  <button
+                    type="button"
+                    className={`gomoku-undo-button${canUndoSelectedGame ? "" : " is-placeholder"}`}
+                    disabled={!canUndoSelectedGame || undoingGameId !== null}
+                    aria-hidden={!canUndoSelectedGame}
+                    aria-busy={canUndoSelectedGame && undoingGameId === selectedGame.id}
+                    tabIndex={canUndoSelectedGame ? 0 : -1}
+                    onClick={() => void handleUndo(selectedGame.id)}
+                  >
+                    撤回
+                  </button>
+                </div>
               </div>
 
               {selectedGame.status === "invited" && selectedGame.playerWhite.id === currentUser.id ? (

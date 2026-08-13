@@ -1,6 +1,6 @@
 # XiaoELong 项目架构文档
 
-> 版本：2.1.0 | 更新日期：2026-08-12
+> 版本：2.1.1 | 更新日期：2026-08-13
 
 ---
 
@@ -46,11 +46,11 @@ XiaoELong/
 │   │   │   ├── DesktopContext.tsx   # 桌面窗口状态
 │   │   │   ├── AuthContext.tsx      # 认证状态
 │   │   │   ├── ChatContext.tsx      # 聊天状态
-│   │   │   ├── DailyContext.tsx     # 每日一题 + 心情
+│   │   │   ├── DailyContext.tsx     # 每日一题 + 心情 + 无闪刷新
 │   │   │   ├── DeityContext.tsx     # 神选膜拜
-│   │   │   └── GomokuContext.tsx    # 五子棋
+│   │   │   └── GomokuContext.tsx    # 五子棋 + 撤回 + 无闪刷新
 │   │   ├── components/              # UI 组件（三层）
-│   │   │   ├── atoms/               #   原子：PetSprite / EnergyWing / UserAvatar
+│   │   │   ├── atoms/               #   原子：PetSprite / EnergyWing / UserAvatar / RefreshStatus
 │   │   │   ├── pages/               #   页面：AuthPage / PanelPage / PanelContent / ...
 │   │   │   └── panels/              #   面板：ChatPanel / GomokuPanel / AvatarDock / ...
 │   │   ├── styles/
@@ -75,12 +75,12 @@ XiaoELong/
 │       │   ├── daily-question.ts    # GET /today, POST /answer, GET /stats
 │       │   ├── daily-mood.ts        # GET /today, POST /
 │       │   ├── deity-worship.ts     # GET /today, POST /
-│       │   └── gomoku.ts            # GET /games, POST /invite/accept/reject/move
+│       │   └── gomoku.ts            # GET /games, POST /invite/accept/reject/move/undo
 │       ├── socket/
 │       │   ├── index.ts             # ★ Socket 事件处理：在线状态、聊天、五子棋
 │       │   └── gomoku-events.ts     # 五子棋事件广播辅助
 │       ├── services/                # 业务逻辑层
-│       │   ├── gomoku-service.ts    # 五子棋：创建对局、落子、胜负判定（含事务）
+│       │   ├── gomoku-service.ts    # 五子棋：创建、落子、撤回、胜负判定（含事务）
 │       │   ├── daily-question-service.ts # 每日一题：生成、答题、统计
 │       │   └── question-generator/  # 题目生成器（策略模式）
 │       │       ├── provider.ts      # 生成器接口定义
@@ -242,9 +242,9 @@ Electron Main Process (main.js)
   - `DesktopContext`：桌面窗口状态、桌宠显示
   - `AuthContext`：认证、用户资料
   - `ChatContext`：聊天消息、上传、Socket 订阅
-  - `DailyContext`：每日一题、每日心情
+  - `DailyContext`：每日一题、每日心情，以及保留当前内容的刷新状态
   - `DeityContext`：神选膜拜
-  - `GomokuContext`：五子棋对局 + Socket 事件分流
+  - `GomokuContext`：五子棋对局、落子/撤回互斥、无闪刷新与 Socket 事件分流
 - 通信层独立为 `services/api.ts`、`services/socket.ts`（共享连接），纯逻辑在 `utils/`
 
 **组件树（三层）：**
@@ -254,7 +254,8 @@ components/
 ├── atoms/                            # 原子组件
 │   ├── PetSprite                     (桌宠精灵动画)
 │   ├── EnergyWing                    (能量翅膀)
-│   └── UserAvatar                    (用户头像)
+│   ├── UserAvatar                    (用户头像)
+│   └── RefreshStatus                 (稳定的刷新进度反馈)
 ├── pages/                            # 页面组件（按 desktopRole 分发）
 │   ├── AuthPage                      (auth 角色，未登录)
 │   ├── AvatarPage                    (avatar 角色)
@@ -282,6 +283,8 @@ Electron IPC ──────────────→ Context dispatch ─�
 用户操作 ─→ handler ─→ REST/Socket/Electron API ─→ 远端
 ```
 
+五子棋和每日一题的非静默刷新采用 stale-while-refresh 展示：请求期间继续渲染已加载内容，只在操作区显示设有最短可见时长的“刷新中…”状态，避免快速请求导致整块内容闪烁；每日一题的后台轮询仍保持静默。
+
 ### 3.4 后端架构（Express + Socket.io）
 
 **分层架构：**
@@ -300,7 +303,7 @@ DB Layer (数据访问层)   → SQL 查询/事务 → 行映射 → 返回领�
 | REST + Socket 双通道 | REST 处理一次性请求（CRUD），Socket 处理实时推送（消息、状态变更） |
 | Service 层独立 | 五子棋和每日一题的业务逻辑从路由/Socket 中抽离，可独立测试 |
 | 策略模式（题目生成） | `QuestionGeneratorProvider` 接口 → DeepSeek 在线 + 本地 fallback |
-| 数据库事务 | 五子棋落子使用 `FOR UPDATE` 行锁 + 事务保证并发安全 |
+| 数据库事务 | 五子棋落子和撤回使用 `FOR UPDATE` 行锁 + 事务保证并发安全 |
 | JWT 双重认证 | REST 用 `Authorization: Bearer` 头，Socket 用 `auth.token` 握手参数 |
 
 ### 3.5 数据库设计（ER 图）
@@ -363,6 +366,7 @@ gomoku_games (五子棋对局)
 ├── current_turn: VARCHAR(36)
 ├── winner: VARCHAR(36)
 ├── board_state: JSON (15×15 二维数组)
+├── last_undone_move_no: INT (最近一次被撤回的落子序号，默认 0)
 ├── created_at / updated_at: DATETIME
 
 gomoku_moves (落子记录)
@@ -374,7 +378,7 @@ gomoku_moves (落子记录)
 └── UNIQUE(game_id, move_no) + UNIQUE(game_id, row_idx, col_idx)
 ```
 
-**数据库迁移策略：** 项目使用条件式 DDL（检查列是否存在再 ALTER TABLE ADD COLUMN），`init.sql` 支持幂等执行。
+**数据库迁移策略：** 项目使用条件式 DDL（检查列是否存在再 `ALTER TABLE ADD COLUMN`），`init.sql` 支持幂等执行。V2.1.1 会为旧库添加 `gomoku_games.last_undone_move_no`；部署包中的 MySQL 5.6 兼容脚本同步包含该迁移。
 
 ---
 
@@ -393,9 +397,11 @@ gomoku_moves (落子记录)
 └──────────┘                               └──────────┘
 
 后续请求：
-REST: Authorization: Bearer <token> → auth middleware → req.user
+REST: Authorization: Bearer <token> → auth middleware → req.user + req.accessTokenClaims
 Socket: io(url, { auth: { token } }) → socket middleware → socket.data.userId
 ```
+
+`GET /api/auth/me` 的响应为 `{ user, accessToken? }`。服务端只对仍有效且账号存在的凭证续签：没有当前会话版本标记的旧 token 会立即升级；当前版本 token 至多提前 7 天返回新的 `accessToken`，短期凭证则按有效期比例提前。客户端通过 Electron 主进程的 compare-and-swap 会话 IPC 原子写入并广播新 token；头像窗口负责常驻定时检查，其他窗口收到广播后重建带新 token 的 REST/Socket 会话。过期或无效 token 仍直接返回 `401`。
 
 ### 4.2 实时聊天流程
 
@@ -423,10 +429,14 @@ Socket: io(url, { auth: { token } }) → socket middleware → socket.data.userI
 定时任务 (node-cron, 每天 8:00 Asia/Shanghai)
 │
 ├── 1. check 今天是否已有题目 → 有则跳过
-├── 2. 调用 DeepSeek API 生成题目
+├── 2. 同一日期的并发 ensure 合并为一个 Promise
+├── 3. 调用 DeepSeek API 生成题目
+│      ├── 全程 JSON Output，并按解析/结构错误最多重试 3 次
+│      ├── 最后一次强制 visual=null，优先保住无附图在线题
 │      ├── 成功 → 存入 DB，source_type="online"
 │      └── 失败 → 使用本地 fallback 题库，source_type="fallback"
-└── 3. 日志记录生成结果
+├── 4. 跨进程重复写入时回读 date 唯一键对应的正式题目
+└── 5. 日志记录生成结果
 
 用户答题：
 GET /api/daily-question/today
@@ -451,17 +461,23 @@ POST /api/daily-question/answer { questionId, answerIndex }
                     ↓         ↓
               ┌──────────┐  ┌──────────┐
               │ playing  │  │ declined │
-              └────┬─────┘  └──────────┘
-                   │
-              五连珠 / 棋盘满
-                   │
-                   ↓
+              └──┬───┬───┘  └──────────┘
+                 │   │
+     合法落子未结束   └─ 撤回最新且未被回应的一手
+                 │               │
+                 └──────↺────────┘
+                 │
+            五连珠 / 棋盘满
+                 │
+                 ↓
               ┌──────────┐
               │ finished │
               └──────────┘
 ```
 
-**并发安全：** 落子操作使用 `SELECT ... FOR UPDATE` 锁定对局行，在事务内完成校验、写入 moves 表、更新 board_state、判断胜负，保证不会出现两人同时落子到同一位置。
+**撤回约束：** 服务端只允许落子者在对方尚未行棋时撤回当前最后一手。事务删除该条 `gomoku_moves`、回退 `board_state` 与 `current_turn`，并把落子序号写入 `last_undone_move_no`；同一序号不能反复撤回，也不能继续向前链式回退。响应中的 `undoAvailableTo` 只用于客户端控制按钮展示，最终资格仍由服务端判断。
+
+**并发安全：** 落子与撤回都使用 `SELECT ... FOR UPDATE` 锁定对局行，在事务内完成资格校验和状态写入。若撤回与对方落子同时到达，只会有一个操作按锁定后的最新状态成功。
 
 ---
 
@@ -472,7 +488,7 @@ POST /api/daily-question/answer { questionId, answerIndex }
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
 | POST | `/api/auth/join` | 否 | 邀请码注册 |
-| GET | `/api/auth/me` | JWT | 获取当前用户 |
+| GET | `/api/auth/me` | JWT | 获取当前用户，并按需返回续签后的 `accessToken` |
 | PUT | `/api/auth/me` | JWT | 更新昵称/头像 |
 | DELETE | `/api/auth/me` | JWT | 注销账户 |
 | GET | `/api/chat/messages?limit=50` | JWT | 获取历史消息 |
@@ -486,6 +502,11 @@ POST /api/daily-question/answer { questionId, answerIndex }
 | GET | `/api/deity-worship/today` | JWT | 获取今日膜拜状态 |
 | POST | `/api/deity-worship` | JWT | 提交膜拜 |
 | GET | `/api/gomoku/games` | JWT | 获取我的对局列表 |
+| POST | `/api/gomoku/invite` | JWT | 发起对局邀请 |
+| POST | `/api/gomoku/accept` | JWT | 接受邀请 |
+| POST | `/api/gomoku/reject` | JWT | 拒绝邀请 |
+| POST | `/api/gomoku/move` | JWT | 落子 |
+| POST | `/api/gomoku/undo` | JWT | 撤回自己最后一手 |
 
 ### 5.2 Socket.io 事件清单
 
@@ -498,6 +519,7 @@ POST /api/daily-question/answer { questionId, answerIndex }
 | `gomoku:accept` | `{gameId}` | `{ok, game?, error?}` | 接受邀请 |
 | `gomoku:reject` | `{gameId}` | `{ok, game?, error?}` | 拒绝邀请 |
 | `gomoku:move` | `{gameId, row, col}` | `{ok, game?, error?}` | 落子 |
+| `gomoku:undo` | `{gameId}` | `{ok, game?, error?}` | 撤回自己最后一手 |
 
 **服务器 → 客户端（广播）：**
 
@@ -524,11 +546,12 @@ POST /api/daily-question/answer { questionId, answerIndex }
 | 窗口管理 | `toggleHomePanel` | Renderer→Main | 切换面板 |
 | 窗口管理 | `hideAllWindows` | Renderer→Main | 隐藏所有窗口 |
 | 会话 | `persistAccessToken` / `clearPersistedAccessToken` | Renderer→Main | 读写本地 token |
+| 会话 | `refreshAccessToken` / `invalidateAccessToken` | Renderer→Main | 按旧 token compare-and-swap 续签或失效，并广播权威会话 |
 | 会话 | `notifyLogin` / `requestLogout` | Renderer→Main | 登录/登出通知 |
 | 设置 | `getSettings` / `setLoginAtStartup` 等 | Renderer↔Main | 桌面设置 |
 | 更新 | `checkForUpdates` / `downloadUpdate` / `installUpdate` | Renderer↔Main | 自动更新 |
 | 拖拽 | `startDrag` / `moveDrag` / `endDrag` | Renderer→Main | 桌宠拖拽 |
-| 事件推送 | `onLogin` / `onLogout` / `onSettingsChange` 等 | Main→Renderer | 主进程事件回调 |
+| 事件推送 | `onLogin` / `onLogout` / `onAccessTokenRefresh` / `onSettingsChange` 等 | Main→Renderer | 主进程事件回调 |
 
 ---
 
@@ -589,9 +612,9 @@ npm run electron:dist:mac → macOS DMG + ZIP（universal）
 | **类型安全** | shared 包提供了前后端类型契约，Socket 事件有完整类型推导 |
 | **分层清晰** | Routes → Services → DB 三层分离，业务逻辑可独立测试 |
 | **安全防护** | JWT 认证、sanitize-html 防 XSS、multer 文件类型校验、zod 输入校验 |
-| **并发安全** | 五子棋使用数据库行锁 + 事务保证并发正确性 |
+| **并发安全** | 五子棋落子与撤回使用数据库行锁 + 事务保证并发正确性 |
 | **容错设计** | DeepSeek 失败自动 fallback 到本地题库；面板渲染崩溃自动恢复；Socket 断线提示 |
-| **防闪烁** | 面板渲染采用 stage → reveal 两阶段显示，避免白屏闪烁 |
+| **防闪烁** | 窗口采用 stage → reveal 两阶段显示；五子棋与每日一题刷新保留旧内容并稳定展示进度 |
 | **幂等迁移** | 数据库 SQL 使用条件式 DDL，支持安全重复执行 |
 
 ### 8.2 优化建议
@@ -608,13 +631,13 @@ npm run electron:dist:mac → macOS DMG + ZIP（universal）
 
 3. **数据库迁移方式不够规范**
    - 问题：`init.sql` 中使用大量条件式 `ALTER TABLE` 实现渐进式迁移，耦合在初始化脚本中
-   - 建议：考虑引入轻量级迁移工具或至少将迁移与初始化分离；当前方式在小项目也可接受，但需注意 8 个 `SET @add_...` 块使文件膨胀到 260 行
+   - 建议：考虑引入轻量级迁移工具或至少将迁移与初始化分离；当前方式在小项目也可接受，但条件式迁移会持续增加 `init.sql` 体积
 
 #### 中优先级
 
 4. **Socket 事件缺少服务端限流**
-   - 问题：`chat:send` 和 `gomoku:move` 没有频率限制，可能被恶意高频调用
-   - 建议：对消息发送和落子操作增加简单的内存限流（如每秒最多 N 次）
+   - 问题：`chat:send`、`gomoku:move` 和 `gomoku:undo` 没有频率限制，可能被恶意高频调用
+   - 建议：对消息发送、落子和撤回操作增加简单的内存限流（如每秒最多 N 次）
 
 5. **日志系统不统一**
    - 问题：使用 `console.log`/`console.error` 直接输出，无结构化日志、无日志级别、无持久化

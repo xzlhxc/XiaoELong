@@ -231,7 +231,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   // ChatPanel 的滚动记忆 ref：Provider 常驻，切 tab 卸载后仍保留，跨挂载恢复滚动位置
   const scrollMemoryRef = useRef<ChatScrollMemory | null>(null);
 
-  const { token, currentUserId, currentUser, logout } = useAuth();
+  const { token, currentUserId, currentUser, invalidateSession } = useAuth();
   const { desktopRole } = useDesktop();
 
   const clear = useCallback((): void => {
@@ -265,8 +265,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (isUnauthorizedError(error)) {
-          window.xiaoelongDesktop?.requestLogout?.();
-          logout();
+          await invalidateSession(token!);
           return;
         }
         dispatch({ type: "SET_SOCKET_ERROR", payload: "聊天记录暂时未加载，实时连接仍会继续重试。" });
@@ -278,7 +277,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => {
       canceled = true;
     };
-  }, [token, currentUserId, logout]);
+  }, [token, currentUserId, invalidateSession]);
 
   // ---- 当前用户资料变更同步到聊天与成员列表 ----
 

@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld("xiaoelongDesktop", {
   notifyLogin: (token) => ipcRenderer.send("desktop:login", token),
   getPersistedAccessToken: () => ipcRenderer.sendSync("desktop:session-token:get"),
   persistAccessToken: (token) => ipcRenderer.send("desktop:session-token:set", token),
+  refreshAccessToken: (expectedToken, renewedToken) =>
+    ipcRenderer.invoke("desktop:session-token:refresh", { expectedToken, renewedToken }),
+  invalidateAccessToken: (expectedToken) =>
+    ipcRenderer.invoke("desktop:session-token:invalidate", expectedToken),
   clearPersistedAccessToken: () => ipcRenderer.send("desktop:session-token:clear"),
   hideAllWindows: () => ipcRenderer.send("desktop:hide-all-windows"),
   setMoodPromptVisible: (visible) => ipcRenderer.send("desktop:mood-prompt-visible", visible),
@@ -78,6 +82,11 @@ contextBridge.exposeInMainWorld("xiaoelongDesktop", {
     const listener = (_event, token) => callback(token);
     ipcRenderer.on("desktop:login", listener);
     return () => ipcRenderer.removeListener("desktop:login", listener);
+  },
+  onAccessTokenRefresh: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("desktop:session-token-refreshed", listener);
+    return () => ipcRenderer.removeListener("desktop:session-token-refreshed", listener);
   },
   onPlacementChange: (callback) => {
     const listener = (_event, placement) => callback(placement);

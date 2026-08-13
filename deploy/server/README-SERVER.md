@@ -1,8 +1,18 @@
 # 小鳄龙服务器部署与更新说明
 
-当前版本：`2.1.0`
+当前版本：`2.1.1`
 
 本目录是小鳄龙 Windows 服务器部署包，适用于宝塔 Windows 面板和 MySQL 5.6。部署包已将需要使用的 MySQL `JSON` 字段改为 `TEXT`，以兼容 MySQL 5.6。
+
+## 2.1.1 更新说明
+
+- 服务端会为仍有效的旧版登录凭证返回当前版本 token，并在当前版 token 临近到期时自动续签。
+- 客户端通过 Electron 主进程原子同步多窗口凭证；晚到的旧 `401` 不会清掉已经续签或切换后的会话。
+- 五子棋新增最后一手撤回：只有落子者能在对方回应前撤回，服务端通过 `last_undone_move_no` 阻止连续回退和反复撤回同一手。
+- 五子棋与每日一题手动刷新时保留当前内容，并显示短暂且稳定的“刷新中…”提示，不再闪出整块加载状态。
+- DeepSeek 每日题修正附图 JSON 结构提示，三次生成均使用 JSON Output 并按上一轮错误纠正；最后一次会强制生成无附图题。同一日期的并发请求只执行一次生成，避免重复调用和重复写入。
+- 本版本没有新增依赖，从 `2.1.0` 升级可以跳过 `npm install`；但 `gomoku_games` 新增 `last_undone_move_no`，必须执行 `db:init`。覆盖程序后应按“执行 `db:init` → 启动新版服务端 → 发布桌面客户端”的顺序更新，同时保留原有 `JWT_SECRET`。
+- 旧客户端可以继续使用新版服务端，但会忽略响应中的续签 token；只有新版客户端与新版服务端同时到位后才会自动保存续签结果。
 
 ## 2.1.0 更新说明
 
@@ -69,7 +79,7 @@ npm.cmd run server:deploy
 命令会先只清理 `server/dist` 和 `shared/dist`，重新构建后生成：
 
 ```text
-deploy\XiaoELong-server-2.1.0.zip
+deploy\XiaoELong-server-2.1.1.zip
 ```
 
 Windows 使用系统自带的 PowerShell/.NET 完成压缩，不需要安装额外的 `zip` 工具；macOS/Linux 需要系统提供 `zip` 命令。脚本先生成同目录临时 ZIP，成功后才替换正式 ZIP，失败时保留上一份正式包。常规 `npm run clean` 不会删除 `deploy` 下已有的部署 ZIP。
@@ -163,6 +173,7 @@ QUESTION_TIMEZONE=Asia/Shanghai
 - `DB_PASSWORD`：MySQL 用户密码。
 - `INVITE_CODE`：新用户注册时使用的邀请码。
 - `JWT_SECRET`：登录令牌签名密钥，部署后不要随意更换，否则现有登录状态会失效。
+- `JWT_EXPIRES_IN`：新签发和自动续签后的登录凭证有效期，必须带明确单位，例如 `30d` 或 `10y`。修改后需要重启服务；不要写裸数字（例如 `3600` 会按毫秒解释）。
 - `UPLOAD_ROOT`：头像、聊天图片和文件的保存目录，更新时不得删除。
 - `UPDATE_ROOT`：桌面客户端自动更新文件目录。
 - `DEEPSEEK_API_KEY`：DeepSeek 密钥。为空或调用失败时，每日题目会使用本地备用题库。
@@ -175,6 +186,26 @@ QUESTION_TIMEZONE=Asia/Shanghai
 ```
 
 将输出结果填入 `.env` 的 `JWT_SECRET`，不要把真实密钥提交到代码仓库或发送给其他人。
+
+### 登录凭证有效期与自动续签
+
+服务端只会续签仍然有效、且账号仍存在的 JWT；已经过期、签名无效或账号已删除的凭证仍会返回 `401`，不会被自动恢复。
+
+- 没有续签版本标记的旧凭证，会在新版客户端下一次调用 `GET /api/auth/me` 时立即按当前 `JWT_EXPIRES_IN` 重新签发。
+- 新版凭证至多提前 7 天续签，短期凭证按有效期比例提前。桌面程序常驻运行时会在到期前自动检查，无需每天重启。
+- 修改 `JWT_EXPIRES_IN` 不会直接改写已经发出去的 JWT；要部署同时包含续签功能的新服务端和新客户端后，旧有效凭证才会被替换。
+- 多窗口桌面端会通过主进程原子替换并广播新凭证，避免旧窗口覆盖新会话。
+- 必须保持 `JWT_SECRET` 不变；更换密钥会让所有尚未过期的旧凭证立即失效。
+
+如果希望续签后的登录状态长期有效，可以在生产 `.env` 中设置：
+
+```env
+JWT_EXPIRES_IN=10y
+```
+
+`10y` 是长期 Bearer 凭证：一旦 token 被复制，在服务端没有独立撤销列表的情况下，持有者可在有效期内冒用账号。当前部署若仍使用 HTTP，更应严格保护服务器、客户端用户目录和日志；不要把 token 发给他人。若不接受这个风险，保留默认 `30d` 即可，活跃客户端仍会自动续签。
+
+修改后重启计划任务。自动续签本身不修改数据库结构，也不需要为续签功能单独执行 `db:init`；但从 `2.1.0` 升级完整的 `2.1.1` 仍必须执行数据库初始化，以添加五子棋撤回字段。
 
 ## 三、初始化数据库
 
@@ -265,7 +296,7 @@ $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 ```
 
 ```powershell
-Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.1.0 server" -Force
+Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.1.1 server" -Force
 ```
 
 启动计划任务：
@@ -304,6 +335,8 @@ Start-ScheduledTask -TaskName "XiaoELongServer"
 ## 六、后续更新服务器程序
 
 服务器程序更新和桌面客户端自动更新是两件不同的事。本节用于更新后端程序。
+
+从 `2.1.0` 升级到 `2.1.1` 时没有依赖变化，可跳过本节第 4 步；数据库新增了五子棋撤回字段，第 5 步不能跳过。覆盖程序后必须先执行 `db:init`，确认成功再启动新版服务端，最后才发布桌面客户端。从更早版本升级或无法确认当前环境时，按完整流程执行。
 
 ### 1. 更新前备份
 
@@ -346,12 +379,16 @@ C:\wwwroot\server\updates
 
 ### 4. 重新安装依赖
 
+从 `2.1.0` 升级到 `2.1.1` 可以跳过本步骤；从更早版本升级或依赖状态无法确认时再执行。
+
 ```powershell
 Set-Location "C:\wwwroot\server"
 & "C:\BtSoft\nodejs\v22.23.1\npm.cmd" install --omit=dev
 ```
 
 ### 5. 更新数据库结构
+
+从 `2.1.0` 升级到 `2.1.1` 必须执行本步骤。脚本会幂等添加 `gomoku_games.last_undone_move_no`，已有对局和落子记录会保留；重复执行不会重复添加字段。
 
 ```powershell
 Set-Location "C:\wwwroot\server\server"
@@ -417,7 +454,7 @@ Get-ScheduledTask -TaskName "XiaoELongServer" | Select-Object TaskName, State
 Invoke-RestMethod "http://127.0.0.1:3001/health"
 ```
 
-最后再通过公网地址验证，并实际测试登录、聊天、每日题目和五子棋。
+最后再通过公网地址验证，并实际测试登录、聊天、每日题目刷新，以及五子棋刷新、落子和撤回。确认新版服务端和数据库迁移正常后，再发布桌面客户端更新。
 
 如果更换了 Node.js 版本或服务器目录，需要重新执行第五节中的计划任务注册命令，更新其可执行文件路径和工作目录。
 
@@ -457,7 +494,7 @@ XiaoELong Setup x.y.z.exe
 
 `latest.yml` 和 `blockmap` 只供自动更新服务使用，不需要发送给普通用户。客户端只会更新到比当前版本更高的版本，因此不能用同一个版本号验证自动更新。
 
-### 2. macOS 2.1.0 检查更新并下载 DMG
+### 2. macOS 2.1.1 检查更新并下载 DMG
 
 Mac 版从 `1.3.2` 开始读取服务器上的：
 
@@ -467,11 +504,11 @@ C:\wwwroot\server\updates\latest-mac.json
 
 发布顺序如下：
 
-1. 在 GitHub 创建标签为 `v2.1.0` 的 Release，并上传 Actions 产物中的 `XiaoELong-2.1.0-mac-universal.dmg`。
+1. 在 GitHub 创建标签为 `v2.1.1` 的 Release，并上传 Actions 产物中的 `XiaoELong-2.1.1-mac-universal.dmg`。
 2. 在浏览器中确认下面的 GitHub HTTPS 地址能开始下载，并核对 DMG 的大小与 `SHA256-mac.txt`：
 
 ```text
-https://github.com/sheephjc/XiaoELong/releases/download/v2.1.0/XiaoELong-2.1.0-mac-universal.dmg
+https://github.com/sheephjc/XiaoELong/releases/download/v2.1.1/XiaoELong-2.1.1-mac-universal.dmg
 ```
 
 3. 最后把同一次 Actions 产物中的 `latest-mac.json` 上传到服务器的 `updates` 目录，覆盖旧清单。
@@ -483,7 +520,7 @@ http://43.139.223.204:3001/updates/latest-mac.json
 
 Mac 客户端只从清单读取版本和发布校验信息，实际打开的下载地址由客户端固定构造为本项目的 GitHub Release HTTPS 地址，清单不能将用户重定向到其他站点。`latest-mac.yml` 和 Mac ZIP 不需要上传到服务器。
 
-静态清单替换后通常不需要重启后端。已经安装 `1.3.2` 或更高版本的用户会看到 `2.1.0` 更新提示；`1.3.1` 没有这段逻辑，需要直接发送 `2.1.0` DMG。
+静态清单替换后通常不需要重启后端。已经安装 `1.3.2` 或更高版本的用户会看到 `2.1.1` 更新提示；`1.3.1` 没有这段逻辑，需要直接发送 `2.1.1` DMG。
 
 Mac 用户下载后需要完全退出旧版 XiaoELong，打开 DMG，把应用拖入“应用程序”并选择替换。未签名测试版首次打开时，可能还需在 Finder 中右键选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。若用户无法访问 GitHub，可以直接把 DMG 文件发给他。
 
@@ -516,6 +553,53 @@ Get-ScheduledTaskInfo -TaskName "XiaoELongServer" | Format-List *
 ```
 
 常见原因包括 Node.js 绝对路径错误、工作目录错误、`.env` 缺失或数据库连接失败。可以先按第四节以前台方式启动，以便直接看到具体报错。
+
+### 在服务器终端删除账号
+
+优先让用户在客户端设置中使用“注销账号”；只有无法通过客户端操作时，才直接从数据库删除。删除账号不可撤销，并会通过外键级联删除该用户的聊天消息、每日答题、每日心情、神选记录以及相关五子棋对局和落子。其他用户消息中指向已删除消息的引用会被置空。
+
+开始前先通过宝塔数据库工具备份 `XiaoELong` 数据库。昵称不唯一，必须先查询并核对完整的用户 UUID，不能直接按昵称删除。以下流程不进入交互式 MySQL，也不使用 `-p`，可避免宝塔终端无法正确隐藏密码输入的问题。
+
+先停止服务器：
+
+```powershell
+Stop-ScheduledTask -TaskName "XiaoELongServer"
+Set-Location 'C:\BtSoft\mysql\MySQL5.5\bin'
+
+$DbLine = Get-Content -LiteralPath 'C:\wwwroot\server\server\.env' | Where-Object { $_ -match '^\s*DB_PASSWORD\s*=' } | Select-Object -First 1
+
+$env:MYSQL_PWD = (($DbLine -replace '^\s*DB_PASSWORD\s*=\s*', '').Trim()).Trim('"').Trim("'")
+```
+
+列出账号并复制目标账号的完整 `id`：
+
+```powershell
+.\mysql.exe -h 127.0.0.1 -P 3306 -u root -D XiaoELong --default-character-set=utf8mb4 -e "SELECT id,nickname,avatar_url,created_at FROM users ORDER BY created_at DESC;"
+```
+
+把目标 UUID 填入 `$UserId`，并再次查询确认。格式检查可以避免误把昵称或不完整的 ID 当成删除条件：
+
+```powershell
+$UserId = '这里粘贴完整UUID'
+
+.\mysql.exe -h 127.0.0.1 -P 3306 -u root -D XiaoELong --default-character-set=utf8mb4 -e "SELECT id,nickname,avatar_url,created_at FROM users WHERE id='$UserId';"
+```
+
+只有确认上一步显示的是目标账号后，才执行删除：
+
+```powershell
+.\mysql.exe -h 127.0.0.1 -P 3306 -u root -D XiaoELong --default-character-set=utf8mb4 -e "START TRANSACTION; DELETE FROM users WHERE id='$UserId'; SELECT ROW_COUNT() AS deleted_users; COMMIT;"
+```
+
+输出中的 `deleted_users` 必须为 `1`。完成后清除当前 PowerShell 会话中的临时密码变量，并重新启动服务器：
+
+```powershell
+Remove-Item Env:MYSQL_PWD -ErrorAction SilentlyContinue
+$DbLine = $null
+Start-ScheduledTask -TaskName "XiaoELongServer"
+```
+
+直接执行 SQL 只会删除数据库记录，不会自动删除 `uploads` 目录中的头像、聊天图片和附件文件；不要为清理单个账号而删除整个 `uploads` 目录。通过客户端“注销账号”时，服务端还会删除该用户当前头像并主动断开其在线连接。
 
 ### 在终端查看当前每日题目来源
 

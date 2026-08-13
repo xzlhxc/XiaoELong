@@ -48,15 +48,21 @@ function formatAttemptError(error: unknown): string {
     const firstIssue = error.issues[0];
     return firstIssue ? `Generated JSON validation failed at ${firstIssue.path.join(".") || "root"}: ${firstIssue.message}` : "Generated JSON validation failed.";
   }
+  if (error instanceof DeepSeekRequestError) {
+    return error.message;
+  }
   if (error instanceof Error) {
     const cause = "cause" in error && error.cause instanceof Error ? error.cause : null;
     const causeCode = cause && "code" in cause ? String(cause.code) : null;
-    if (cause) {
-      return `${error.message} (${causeCode ? `${causeCode}: ` : ""}${cause.message})`;
-    }
-    return error.message;
+    return causeCode
+      ? `DeepSeek request failed (${causeCode}).`
+      : `DeepSeek request failed (${error.name || "unknown error"}).`;
   }
   return "Unknown DeepSeek error.";
+}
+
+function compactErrorSummary(message: string): string {
+  return message.replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 const visualSchema = z.discriminatedUnion("type", [
@@ -147,9 +153,13 @@ const generatedSchema = z.object({
   category: z.string().trim().min(1).max(32),
   question: z.string().trim().min(1).max(240),
   options: z.array(z.string().trim().min(1).max(80)).length(4),
-  visual: visualSchema.nullable().optional(),
+  visual: visualSchema.nullable(),
   correctAnswerIndex: z.number().int().min(0).max(3),
   explanation: z.string().trim().min(1).max(240)
+});
+
+const textOnlyGeneratedSchema = generatedSchema.extend({
+  visual: z.null()
 });
 
 export class DeepSeekQuestionGeneratorProvider implements QuestionGeneratorProvider {
@@ -178,21 +188,21 @@ export class DeepSeekQuestionGeneratorProvider implements QuestionGeneratorProvi
       "- 可以生成附图题，但只能使用 visual 模板字段；不能依赖真实图片、外部链接、当天新闻、复杂手绘或火柴摆放。",
       "- 只有一个正确答案，选项长度适中，不要在选项前写 A/B/C/D。",
       "- 解析要简短但有推理过程，直接解释为什么正确。",
-      "- 如果不需要附图，visual 必须为 null。",
+      "- visual 字段必须始终存在。不需要附图时必须为 null；需要附图时必须严格使用 {\"type\":\"类型名\",\"data\":{...}} 包装，type 和 data 同级，data 必填且必须是对象。",
       "",
-      "visual 模板只能从以下类型选择：",
-      "- clock: {hour, minute}",
-      "- venn2: {leftLabel, rightLabel, leftOnly, both, rightOnly, outside?}",
-      "- pathGrid: {rows, cols, start:[row,col], end:[row,col], allowedMoves:[\"right\",\"down\"]}",
-      "- barChart: {title?, items:[{label,value}]}",
-      "- logicTable: {people, roles, marks:[{person,role,value}]}",
-      "- triangle: {points:[\"A\",\"B\",\"C\"], equalSides?, angles?, unknownAngleAt?}",
+      "visual 只能从以下完整包装结构中选择，不要把 data 内的字段直接放到 visual 下：",
+      "- clock: {\"type\":\"clock\",\"data\":{\"hour\":3,\"minute\":30}}",
+      "- venn2: {\"type\":\"venn2\",\"data\":{\"leftLabel\":\"集合甲\",\"rightLabel\":\"集合乙\",\"leftOnly\":12,\"both\":5,\"rightOnly\":8,\"outside\":3}}",
+      "- pathGrid: {\"type\":\"pathGrid\",\"data\":{\"rows\":3,\"cols\":3,\"start\":[0,0],\"end\":[2,2],\"allowedMoves\":[\"right\",\"down\"]}}",
+      "- barChart: {\"type\":\"barChart\",\"data\":{\"title\":\"阅读数量\",\"items\":[{\"label\":\"甲\",\"value\":20},{\"label\":\"乙\",\"value\":35},{\"label\":\"丙\",\"value\":25}]}}",
+      "- logicTable: {\"type\":\"logicTable\",\"data\":{\"people\":[\"甲\",\"乙\",\"丙\"],\"roles\":[\"教师\",\"医生\",\"律师\"],\"marks\":[{\"person\":\"甲\",\"role\":\"教师\",\"value\":false}]}}",
+      "- triangle: {\"type\":\"triangle\",\"data\":{\"points\":[\"A\",\"B\",\"C\"],\"equalSides\":[[\"A\",\"B\"],[\"A\",\"C\"]],\"angles\":[{\"point\":\"B\",\"degrees\":50}],\"unknownAngleAt\":\"A\"}}",
       "",
       `日期: ${input.date}`,
       ...avoidSection,
       "",
-      "JSON 输出格式示例：",
-      "{\"category\":\"语文常识\",\"question\":\"下列哪位不是唐宋八大家？\",\"options\":[\"韩愈\",\"柳宗元\",\"李白\",\"苏轼\"],\"visual\":null,\"correctAnswerIndex\":2,\"explanation\":\"唐宋八大家包括韩愈、柳宗元、欧阳修、苏洵、苏轼、苏辙、王安石、曾巩，李白不在其中。\"}"
+      "带非空 visual 的完整 JSON 输出示例：",
+      "{\"category\":\"数学推理\",\"question\":\"图中钟面显示 3:30，此时时针与分针的较小夹角约为多少度？\",\"options\":[\"75 度\",\"90 度\",\"105 度\",\"120 度\"],\"visual\":{\"type\":\"clock\",\"data\":{\"hour\":3,\"minute\":30}},\"correctAnswerIndex\":0,\"explanation\":\"3:30 时分针位于 180 度，时针位于 105 度，两者较小夹角为 75 度。\"}"
     ].join("\n");
 
     const url = new URL("chat/completions", this.baseUrl.endsWith("/") ? this.baseUrl : `${this.baseUrl}/`);
@@ -201,10 +211,19 @@ export class DeepSeekQuestionGeneratorProvider implements QuestionGeneratorProvi
     for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      const useJsonMode = attempt < MAX_GENERATION_ATTEMPTS;
+      const previousError = attemptErrors.at(-1);
+      const forceTextOnly = attempt === MAX_GENERATION_ATTEMPTS;
       const retryInstruction = attempt === 1
         ? ""
-        : `\n\n这是第 ${attempt} 次生成尝试。请更换题目内容，并直接输出一个完整 JSON 对象，不要输出 Markdown 或解释性前缀。`;
+        : [
+            `\n\n这是第 ${attempt} 次生成尝试。上一次未通过：${previousError ?? "输出格式不符合要求。"}`,
+            "请针对该错误重新生成，并直接输出一个完整 JSON 对象，不要输出 Markdown 或解释性前缀。",
+            ...(forceTextOnly
+              ? ["这是最后一次尝试：visual 必须严格为 null，题目、选项和解析都不得依赖附图。"]
+              : [])
+          ].join("\n");
+      let finishReason: string | null = null;
+      let contentLength = 0;
 
       try {
         const response = await fetch(url, {
@@ -228,18 +247,17 @@ export class DeepSeekQuestionGeneratorProvider implements QuestionGeneratorProvi
             thinking: {
               type: "disabled"
             },
-            ...(useJsonMode ? { response_format: { type: "json_object" } } : {}),
-            temperature: 0.72,
-            max_tokens: 1400,
+            response_format: { type: "json_object" },
+            temperature: 0.4,
+            max_tokens: 1800,
             stream: false
           }),
           signal: controller.signal
         });
 
         if (!response.ok) {
-          const errorText = (await response.text()).slice(0, 600);
           throw new DeepSeekRequestError(
-            `DeepSeek request failed: ${response.status}${errorText ? ` ${errorText}` : ""}`,
+            `DeepSeek request failed with status ${response.status}.`,
             RETRYABLE_STATUS_CODES.has(response.status)
           );
         }
@@ -252,13 +270,22 @@ export class DeepSeekQuestionGeneratorProvider implements QuestionGeneratorProvi
         };
         const choice = json.choices?.[0];
         const content = choice?.message?.content;
+        finishReason = choice?.finish_reason ?? null;
+        contentLength = typeof content === "string" ? content.length : 0;
+        if (finishReason && finishReason !== "stop") {
+          throw new DeepSeekRequestError(
+            finishReason === "length"
+              ? "DeepSeek output was truncated because it reached the token limit."
+              : `DeepSeek generation stopped unexpectedly (finish_reason: ${finishReason}).`
+          );
+        }
         if (!content) {
           throw new DeepSeekRequestError(
-            `DeepSeek returned no final content${choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ""}.`
+            `DeepSeek returned no final content${finishReason ? ` (finish_reason: ${finishReason})` : ""}.`
           );
         }
 
-        const generated = generatedSchema.parse(parseGeneratedContent(content));
+        const generated = (forceTextOnly ? textOnlyGeneratedSchema : generatedSchema).parse(parseGeneratedContent(content));
         return {
           ...generated,
           visual: generated.visual ?? null,
@@ -274,13 +301,20 @@ export class DeepSeekQuestionGeneratorProvider implements QuestionGeneratorProvi
         const message = error instanceof Error && error.name === "AbortError"
           ? `DeepSeek request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds.`
           : formatAttemptError(error);
-        attemptErrors.push(message);
+        const errorSummary = compactErrorSummary(message);
+        attemptErrors.push(errorSummary);
+
+        console.warn("[DailyQuestion] DeepSeek generation attempt failed", {
+          attempt,
+          finishReason,
+          contentLength,
+          error: errorSummary
+        });
 
         const retryable = !(error instanceof DeepSeekRequestError) || error.retryable;
         if (!retryable || attempt === MAX_GENERATION_ATTEMPTS) {
           break;
         }
-        console.warn(`[DailyQuestion] DeepSeek attempt ${attempt} failed: ${message}`);
         await waitBeforeRetry(attempt);
       } finally {
         clearTimeout(timeout);

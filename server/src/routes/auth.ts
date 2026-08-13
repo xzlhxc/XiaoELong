@@ -2,7 +2,7 @@ import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import type { ClientToServerEvents, ServerToClientEvents } from "@xiaoelong/shared";
+import type { AuthMeResponse, ClientToServerEvents, ServerToClientEvents } from "@xiaoelong/shared";
 import type { Server } from "socket.io";
 import multer from "multer";
 import sanitizeHtml from "sanitize-html";
@@ -12,7 +12,7 @@ import { createUser, deleteUserById, updateUserProfile } from "../db/users.js";
 import { requireAuth } from "../middleware/auth.js";
 import { listPresenceUsers } from "../socket/index.js";
 import { avatarDir, ensureUploadDirs, resolveAvatarPath } from "../utils/uploads.js";
-import { signAccessToken } from "../utils/jwt.js";
+import { shouldRefreshAccessToken, signAccessToken } from "../utils/jwt.js";
 
 const router = Router();
 
@@ -115,12 +115,24 @@ router.post("/join", avatarUpload.single("avatar"), async (req, res, next) => {
 });
 
 router.get("/me", requireAuth, (req, res) => {
-  if (!req.user) {
+  if (!req.user || !req.accessTokenClaims) {
     res.status(401).json({ message: "Unauthorized." });
     return;
   }
 
-  res.json({ user: req.user });
+  const response: AuthMeResponse = { user: req.user };
+  res.set("Cache-Control", "private, no-store");
+  if (
+    shouldRefreshAccessToken(
+      req.accessTokenClaims.exp,
+      req.accessTokenClaims.sessionVersion,
+      req.accessTokenClaims.iat
+    )
+  ) {
+    response.accessToken = signAccessToken(req.user.id);
+  }
+
+  res.json(response);
 });
 
 export function createAuthRouter(io: Server<ClientToServerEvents, ServerToClientEvents>): Router {

@@ -18,8 +18,15 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
+  let claims: ReturnType<typeof verifyAccessToken>;
   try {
-    const claims = verifyAccessToken(token);
+    claims = verifyAccessToken(token);
+  } catch {
+    res.status(401).json({ message: "Unauthorized." });
+    return;
+  }
+
+  try {
     const user = await getUserById(claims.sub);
     if (!user) {
       res.status(401).json({ message: "Unauthorized." });
@@ -27,8 +34,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
 
     req.user = user;
+    req.accessTokenClaims = claims;
     next();
-  } catch {
-    res.status(401).json({ message: "Unauthorized." });
+  } catch (error) {
+    next(error);
   }
 }

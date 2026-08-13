@@ -4,6 +4,7 @@ import type {
   GomokuInvitePayload,
   GomokuMovePayload,
   GomokuRejectPayload,
+  GomokuUndoPayload,
   PresenceUser,
   ServerToClientEvents
 } from "@xiaoelong/shared";
@@ -270,6 +271,20 @@ export function setupSocket(
           return;
         }
         ack?.({ ok: false, error: "Failed to apply gomoku move." });
+      }
+    });
+
+    socket.on("gomoku:undo", async (payload: GomokuUndoPayload, ack) => {
+      try {
+        const game = await dependencies.gomokuService.undoMove(payload.gameId, userId);
+        emitGomokuUpdate(io, game);
+        ack?.({ ok: true, game });
+      } catch (error) {
+        if (error instanceof GomokuValidationError) {
+          ack?.({ ok: false, error: error.message });
+          return;
+        }
+        ack?.({ ok: false, error: "Failed to retract gomoku move." });
       }
     });
 

@@ -394,9 +394,13 @@ function getDesktopSettings() {
   };
 }
 
-function sendToRenderers(channel, payload) {
+function sendToRenderers(channel, payload, excludedWebContents = null) {
   for (const targetWindow of [authWindow, avatarWindow, panelWindow, divineWindow]) {
-    if (targetWindow && !targetWindow.webContents.isDestroyed()) {
+    if (
+      targetWindow &&
+      !targetWindow.webContents.isDestroyed() &&
+      targetWindow.webContents !== excludedWebContents
+    ) {
       targetWindow.webContents.send(channel, payload);
     }
   }
@@ -1761,6 +1765,58 @@ ipcMain.on("desktop:panel-visibility:get", (event) => {
 
 ipcMain.on("desktop:session-token:set", (_event, token) => {
   persistAccessToken(token);
+});
+
+ipcMain.handle("desktop:session-token:refresh", (event, payload) => {
+  const expectedToken = payload?.expectedToken;
+  const renewedToken = payload?.renewedToken;
+  if (
+    typeof expectedToken !== "string" ||
+    expectedToken.length === 0 ||
+    expectedToken.length > 8192 ||
+    typeof renewedToken !== "string" ||
+    renewedToken.length === 0 ||
+    renewedToken.length > 8192
+  ) {
+    return null;
+  }
+
+  const persistedToken = readPersistedAccessToken();
+  if (persistedToken === renewedToken) {
+    return renewedToken;
+  }
+  if (persistedToken !== expectedToken) {
+    return persistedToken;
+  }
+
+  persistAccessToken(renewedToken);
+  sendToRenderers(
+    "desktop:session-token-refreshed",
+    { expectedToken, renewedToken },
+    event.sender
+  );
+  return renewedToken;
+});
+
+ipcMain.handle("desktop:session-token:invalidate", (_event, expectedToken) => {
+  if (
+    typeof expectedToken !== "string" ||
+    expectedToken.length === 0 ||
+    expectedToken.length > 8192
+  ) {
+    return readPersistedAccessToken();
+  }
+
+  const persistedToken = readPersistedAccessToken();
+  if (persistedToken !== expectedToken) {
+    return persistedToken;
+  }
+
+  clearPersistedAccessToken();
+  sendToRenderers("desktop:logout");
+  currentWindowMode = "auth";
+  showAuthMode();
+  return null;
 });
 
 ipcMain.on("desktop:session-token:clear", () => {

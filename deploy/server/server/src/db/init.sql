@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS gomoku_games (
   current_turn VARCHAR(36) NULL,
   winner VARCHAR(36) NULL,
   board_state TEXT NOT NULL,
+  last_undone_move_no INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_gomoku_status_updated (status, updated_at),
@@ -271,6 +272,16 @@ CREATE TABLE IF NOT EXISTS gomoku_games (
     FOREIGN KEY (player_white) REFERENCES users(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @add_gomoku_last_undone_move_no = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'gomoku_games' AND COLUMN_NAME = 'last_undone_move_no') = 0,
+  'ALTER TABLE gomoku_games ADD COLUMN last_undone_move_no INT NOT NULL DEFAULT 0 AFTER board_state',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_gomoku_last_undone_move_no;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS gomoku_moves (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

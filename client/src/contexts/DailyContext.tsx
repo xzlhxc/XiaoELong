@@ -177,7 +177,13 @@ export function DailyProvider({ children }: { children: React.ReactNode }) {
     invalidateSession();
     if (!token || !currentUserId) {
       dispatch({ type: "CLEAR" });
+      return;
     }
+
+    // 同一账号续签会让旧 token 的请求失效，但不应清空已加载的数据；
+    // 同时复位由旧请求持有的临时加载状态，避免 finally 因代际失效而无法收尾。
+    dispatch({ type: "SET_DAILY_LOADING", payload: false });
+    dispatch({ type: "SET_MOOD_LOADING", payload: false });
   }, [token, currentUserId, invalidateSession]);
 
   // ---- 数据加载 ----

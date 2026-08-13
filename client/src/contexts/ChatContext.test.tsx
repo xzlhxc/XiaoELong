@@ -115,17 +115,17 @@ vi.mock("./DesktopContext", () => ({ useDesktop: vi.fn() }));
 
 const mockedUseAuth = vi.mocked(useAuth);
 const mockedUseDesktop = vi.mocked(useDesktop);
-const logoutMock = vi.fn();
+const invalidateSessionMock = vi.fn();
 
 /**
- * ChatContext 从 Auth 读取当前用户并在历史 401 时注销；其余字段用类型断言占位。
+ * ChatContext 从 Auth 读取当前用户并在历史 401 时条件失效对应会话；其余字段用类型断言占位。
  */
 function mockAuth(token: string | null, currentUserId: string | null): void {
   mockedUseAuth.mockReturnValue({
     token,
     currentUserId,
     currentUser: currentUserId ? makeUser(currentUserId) : null,
-    logout: logoutMock
+    invalidateSession: invalidateSessionMock
   } as unknown as AuthContextValue);
 }
 
@@ -193,7 +193,8 @@ async function renderChat() {
 
 beforeEach(() => {
   socketMock.reset();
-  logoutMock.mockReset();
+  invalidateSessionMock.mockReset();
+  invalidateSessionMock.mockResolvedValue(undefined);
   mockedUseAuth.mockReset();
   mockedUseDesktop.mockReset();
   apiMock.getRecentMessages.mockReset();
@@ -577,7 +578,7 @@ describe("聊天历史加载", () => {
 
     await act(async () => {});
     expect(result.current.socketError).toBeNull();
-    expect(logoutMock).toHaveBeenCalledTimes(1);
+    expect(invalidateSessionMock).toHaveBeenCalledWith("t1");
   });
 
   it("加载成功 → messages 被填充", async () => {

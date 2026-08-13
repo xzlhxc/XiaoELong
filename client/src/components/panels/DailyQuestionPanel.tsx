@@ -6,6 +6,7 @@ import type {
   DailyQuestionVoter
 } from "@xiaoelong/shared";
 import { useDaily } from "../../contexts/DailyContext";
+import { RefreshStatus, useRefreshFeedback } from "../atoms/RefreshStatus";
 import { UserAvatar } from "../atoms/UserAvatar";
 
 function getPercent(count: number, total: number): number {
@@ -310,24 +311,28 @@ function renderStats(
 
 export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Element {
   const { dailyData, dailyLoading, dailyError, refreshDaily, answerDaily } = useDaily();
-
-  if (dailyLoading) {
-    return (
-      <section className="module-card daily-card">
-        <h2>每日一题</h2>
-        <p className="muted-text">正在加载题目...</p>
-      </section>
-    );
-  }
+  const { isRefreshing, runRefresh } = useRefreshFeedback(refreshDaily, dailyLoading);
 
   if (!dailyData) {
     return (
       <section className="module-card daily-card">
-        <h2>每日一题</h2>
-        <p className="muted-text">{dailyError || "暂时没有可用题目。"}</p>
-        <button type="button" className="ghost-button" onClick={() => void refreshDaily()}>
-          重试
-        </button>
+        <div className="module-head daily-head">
+          <h2>每日一题</h2>
+          <div className="daily-actions">
+            <RefreshStatus active={isRefreshing} />
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={isRefreshing}
+              onClick={() => void runRefresh()}
+            >
+              {dailyError ? "重试" : "刷新"}
+            </button>
+          </div>
+        </div>
+        <p className="muted-text">
+          {dailyLoading ? "正在加载题目..." : (dailyError || "暂时没有可用题目。")}
+        </p>
       </section>
     );
   }
@@ -343,9 +348,17 @@ export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Elemen
           <span className="question-category">{question.category}</span>
           <span className="question-date">{question.date}</span>
         </div>
-        <button type="button" className="ghost-button" onClick={() => void refreshDaily()}>
-          刷新
-        </button>
+        <div className="daily-actions">
+          <RefreshStatus active={isRefreshing} />
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={isRefreshing}
+            onClick={() => void runRefresh()}
+          >
+            刷新
+          </button>
+        </div>
       </div>
 
       <div className="daily-content">

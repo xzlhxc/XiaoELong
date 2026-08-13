@@ -1,6 +1,6 @@
 # XiaoELong 项目文件清单
 
-> 更新日期：2026-08-12 | 版本：2.1.0
+> 更新日期：2026-08-13 | 版本：2.1.1
 
 本文档列出项目所有文件和目录的用途，并标识可删除/优化的文件。
 
@@ -117,11 +117,11 @@ XiaoELong/
 | 文件 | 行数 | 作用 |
 |------|------|------|
 | `client/src/contexts/DesktopContext.tsx` | ~505 | 桌面窗口状态：desktopRole、窗口显示、桌宠显示模式 |
-| `client/src/contexts/AuthContext.tsx` | ~448 | 认证：token、currentUser、登录/登出/资料更新 |
-| `client/src/contexts/DeityContext.tsx` | ~408 | 神选膜拜：神明列表、段位、膜拜状态 |
-| `client/src/contexts/ChatContext.tsx` | ~427 | 聊天：消息列表、发送（含引用）、图片/文件上传、Socket 订阅 |
-| `client/src/contexts/GomokuContext.tsx` | ~422 | 五子棋：对局列表、状态、Socket 事件分流 |
-| `client/src/contexts/DailyContext.tsx` | ~400 | 每日一题 + 每日心情：题目、答题、心情选择 |
+| `client/src/contexts/AuthContext.tsx` | ~860 | 认证：登录/登出、资料更新、自动续签和多窗口会话对账 |
+| `client/src/contexts/DeityContext.tsx` | ~475 | 神选膜拜：列表、段位、膜拜状态及续签时请求失效保护 |
+| `client/src/contexts/ChatContext.tsx` | ~466 | 聊天：消息、引用、附件、Socket 订阅及条件会话失效 |
+| `client/src/contexts/GomokuContext.tsx` | ~578 | 五子棋：对局状态、落子/撤回互斥、无闪刷新、Socket 分流及续签时请求失效保护 |
+| `client/src/contexts/DailyContext.tsx` | ~471 | 每日一题 + 每日心情：题目、答题、心情选择、静默轮询与无闪刷新状态 |
 
 ### UI 组件（components/ 三层）
 
@@ -132,6 +132,7 @@ XiaoELong/
 | `client/src/components/atoms/PetSprite.tsx` | ~302 | 桌宠精灵动画：基于 spritesheet 的帧动画渲染 |
 | `client/src/components/atoms/EnergyWing.tsx` + `.css` | ~220 + 95 | 能量翅膀装饰动画组件 |
 | `client/src/components/atoms/UserAvatar.tsx` | ~49 | 用户头像组件 |
+| `client/src/components/atoms/RefreshStatus.tsx` | ~90 | 通用刷新反馈：防重复触发并保证“刷新中”至少稳定显示 650ms |
 
 #### pages/ — 页面组件（按 desktopRole 分发）
 
@@ -151,8 +152,8 @@ XiaoELong/
 |------|------|------|
 | `client/src/components/panels/ChatPanel.tsx` | ~1071 | 聊天面板：消息列表、文字输入、图片/文件上传、右键引用、滚动到底 |
 | `client/src/components/panels/DivineSelectionPanel.tsx` | ~461 | 神选膜拜面板：七位神明卡片、段位展示、膜拜按钮 |
-| `client/src/components/panels/GomokuPanel.tsx` | ~433 | 五子棋面板：对局列表、棋盘渲染、落子交互、邀请选择 |
-| `client/src/components/panels/DailyQuestionPanel.tsx` | ~376 | 每日一题面板：题目展示（含可视化附图）、四选一、统计柱状图、答案揭晓 |
+| `client/src/components/panels/GomokuPanel.tsx` | ~452 | 五子棋面板：对局列表、棋盘渲染、落子/撤回交互、邀请选择及刷新状态 |
+| `client/src/components/panels/DailyQuestionPanel.tsx` | ~389 | 每日一题面板：题目展示（含可视化附图）、四选一、统计柱状图、答案揭晓及保留内容的刷新状态 |
 | `client/src/components/panels/AvatarDock.tsx` | ~363 | 悬浮桌宠容器：拖拽入口、形象展示、面板开关、心情快捷选择 |
 | `client/src/components/panels/StatusBar.tsx` | ~192 | 在线状态栏：在线用户列表 + 每日心情选择器 |
 | `client/src/components/panels/SettingsProfileForm.tsx` | ~98 | 设置/个人资料表单：昵称、头像、注销、桌宠设置 |
@@ -165,13 +166,13 @@ XiaoELong/
 | `client/src/styles/styles.css` | 全局样式：布局、配色、聊天、面板、状态栏等 |
 | `client/src/styles/divine-constellation.css` | 神选星座主题视觉样式 |
 
-### 测试（与源码同目录 co-located，共 310 条用例）
+### 测试（与源码同目录 co-located）
 
 | 文件 | 作用 |
 |------|------|
 | `client/src/contexts/*.test.tsx` | 6 个 Context 测试（Auth/Chat/Daily/Deity/Desktop/Gomoku） |
 | `client/src/components/pages/*.test.tsx` | 7 个页面组件测试 |
-| `client/src/components/panels/*.test.tsx` | 6 个面板组件测试（含 JoinForm） |
+| `client/src/components/panels/*.test.tsx` | 7 个面板组件测试（含新增的 DailyQuestionPanel 刷新保真测试） |
 | `client/src/services/socket.test.ts` | Socket 共享连接测试 |
 | `client/src/utils/chat-time.test.ts` | 聊天时间格式化单测 |
 | `client/src/utils/deity-rank-visuals.test.ts` | 神选段位视觉单测 |
@@ -209,28 +210,28 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `server/src/routes/auth.ts` | ~235 | 认证路由：POST /join（邀请码注册+头像上传）、GET /me（获取当前用户）、PUT /me（更新资料）、DELETE /me（注销） |
+| `server/src/routes/auth.ts` | ~246 | 认证路由：POST /join、GET /me（获取用户并按需续签）、PUT /me、DELETE /me |
 | `server/src/routes/chat.ts` | ~149 | 聊天路由：GET /messages（历史消息）、POST /images（上传图片）、POST /files（上传文件） |
 | `server/src/routes/daily-question.ts` | ~80 | 每日一题路由：GET /today（今日题目+统计）、POST /answer（提交答案）、GET /stats（题目统计） |
 | `server/src/routes/daily-mood.ts` | ~50 | 每日心情路由：GET /today（今日心情）、POST /（设置心情） |
 | `server/src/routes/deity-worship.ts` | ~60 | 神选膜拜路由：GET /today（今日膜拜状态）、POST /（提交膜拜） |
-| `server/src/routes/gomoku.ts` | ~60 | 五子棋 REST 路由：GET /games（我的对局列表） |
+| `server/src/routes/gomoku.ts` | ~177 | 五子棋 REST 路由：GET /games 与邀请、接受、拒绝、落子、撤回操作 |
 
 ### Socket 层
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `server/src/socket/index.ts` | ~263 | **Socket 事件处理核心**：连接认证（JWT 握手）、在线状态管理（Map<userId, socketId[]>）、chat:send 处理、presence 广播、消息/心情/神选事件转发 |
-| `server/src/socket/gomoku-events.ts` | ~80 | 五子棋 Socket 事件：invite/accept/reject/move 的认证、参数校验、Service 调用和广播 |
+| `server/src/socket/index.ts` | ~300 | **Socket 事件处理核心**：连接认证、在线状态、聊天，以及五子棋 invite/accept/reject/move/undo 的 Service 调用与 Ack |
+| `server/src/socket/gomoku-events.ts` | ~20 | 五子棋更新与结束状态的定向广播辅助 |
 
 ### 业务服务层（Services）
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `server/src/services/gomoku-service.ts` | ~378 | **五子棋核心**：创建对局、接受/拒绝邀请、落子校验、胜负判定（四方向扫描连续5子）、并发安全（FOR UPDATE 行锁 + 事务） |
-| `server/src/services/daily-question-service.ts` | ~200 | 每日一题服务：今日题目获取（含统计 + 本人答案）、答题提交、统计计算 |
+| `server/src/services/gomoku-service.ts` | ~491 | **五子棋核心**：创建对局、接受/拒绝、落子、最后一手撤回、防链式撤回、胜负判定及事务并发控制 |
+| `server/src/services/daily-question-service.ts` | ~200 | 每日一题服务：同日期 single-flight 合并并发生成、重复键回读权威记录、在线/备用题落库、今日题目与统计、答题提交 |
 | `server/src/services/question-generator/provider.ts` | ~15 | 题目生成器接口定义（策略模式） |
-| `server/src/services/question-generator/deepseek-provider.ts` | ~150 | DeepSeek AI 生成器：调用 API 生成题目、JSON 解析、schema 校验、失败回退到本地题库 |
+| `server/src/services/question-generator/deepseek-provider.ts` | ~330 | DeepSeek AI 生成器：严格 JSON Output、附图 schema 校验、带错误反馈的重试与无附图收尾 |
 | `server/src/services/question-generator/mock-provider.ts` | ~30 | Mock 生成器：测试用，返回固定题目 |
 
 ### 数据访问层（DB）
@@ -239,7 +240,7 @@ XiaoELong/
 |------|------|------|
 | `server/src/db/pool.ts` | ~15 | MySQL 连接池创建（mysql2/promise，connectionLimit=10） |
 | `server/src/db/init.ts` | ~40 | 数据库初始化脚本：读取 init.sql、连接数据库、执行 SQL |
-| `server/src/db/init.sql` | ~260 | **数据库 DDL + 渐进式迁移**：CREATE TABLE（7 张表）+ 条件式 ALTER TABLE（8 个 PREPARE/EXECUTE 块） |
+| `server/src/db/init.sql` | ~302 | **数据库 DDL + 渐进式迁移**：创建 7 张表并通过条件式 ALTER 幂等补列；V2.1.1 新增 `gomoku_games.last_undone_move_no` |
 | `server/src/db/users.ts` | ~100 | 用户 CRUD：创建（UUID v4）、按 ID 查询、按昵称查询、更新资料、删除（级联） |
 | `server/src/db/messages.ts` | ~60 | 消息存取：插入消息（含图片/文件元数据）、查询最近 N 条历史 |
 | `server/src/db/daily-questions.ts` | ~80 | 每日一题存取：按日期查询题目、插入题目、查询答案、插入答案、统计 |
@@ -251,13 +252,13 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `server/src/middleware/auth.ts` | ~30 | JWT 认证中间件：从 `Authorization: Bearer <token>` 提取并验证 token，注入 `req.user` |
+| `server/src/middleware/auth.ts` | ~42 | JWT 认证中间件：注入用户与 claims，并区分 401 和数据库 5xx |
 
 ### 工具函数
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `server/src/utils/jwt.ts` | ~20 | JWT 签发（sign）和验证（verify），HS256 算法 |
+| `server/src/utils/jwt.ts` | ~65 | JWT 签发、验证、会话版本迁移与动态续签阈值 |
 | `server/src/utils/chat.ts` | ~20 | 聊天内容清洗：sanitize-html 防 XSS |
 | `server/src/utils/uploads.ts` | ~20 | 上传目录管理：根据 UPLOAD_ROOT 创建 avatars/chat-images/chat-files 子目录 |
 | `server/src/utils/time.ts` | ~15 | 时区工具：获取 Asia/Shanghai 当前日期字符串 |
@@ -272,7 +273,7 @@ XiaoELong/
 
 | 文件 | 作用 |
 |------|------|
-| `server/src/types/express.d.ts` | Express Request 类型扩展：声明 `req.user` 字段 |
+| `server/src/types/express.d.ts` | Express Request 类型扩展：声明 `req.user` 与 `req.accessTokenClaims` |
 
 ### 诊断脚本
 
@@ -294,8 +295,8 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `electron/main.js` | ~1933 | **Electron 主进程**：app 生命周期、5 种窗口创建（auth/avatar/panel/divine/imageViewer）、IPC 处理（login/logout/settings/drag/update）、系统托盘、Windows 自动更新、macOS 手动更新、内嵌服务器管理 |
-| `electron/preload.js` | ~102 | 预加载脚本：通过 `contextBridge.exposeInMainWorld` 暴露 `window.xiaoelongDesktop` API（窗口管理、会话、设置、更新、拖拽） |
+| `electron/main.js` | ~1994 | **Electron 主进程**：窗口、托盘、更新、内嵌服务及原子会话 IPC |
+| `electron/preload.js` | ~111 | 预加载脚本：暴露窗口、会话续签、设置、更新与拖拽 API |
 | `electron/render-session.js` | ~50 | 面板渲染会话管理：stage（透明不可交互）→ reveal（不透明可交互）两阶段防闪烁，3 秒超时兜底 |
 | `electron/manual-mac-updater.js` | ~199 | macOS 手动更新逻辑：获取 `latest-mac.json`、版本比较、语义化版本解析、安全校验（大小限制 64KB、格式校验） |
 | `electron/image-viewer.html` | ~430 | 独立图片查看器页面：完整适配图片，支持滚轮/键盘缩放、拖拽、导航和防旧图闪现 |
@@ -317,7 +318,7 @@ XiaoELong/
 |------|------|------|
 | `shared/package.json` | ~15 | workspace 内部包定义：`@xiaoelong/shared` |
 | `shared/tsconfig.json` | ~15 | TypeScript 编译配置（输出到 dist/） |
-| `shared/src/index.ts` | ~400 | **类型契约中心**：所有 DTO 类型（UserProfile、ChatMessage 含引用 replyTo、DailyQuestion 等）、Socket 事件类型（ServerToClientEvents、ClientToServerEvents）、业务常量（MOOD_OPTIONS 16 种、DEITY_CATALOG 7 位、DEITY_RANKS 5 级）、工具函数（getDeityRank） |
+| `shared/src/index.ts` | ~411 | **类型契约中心**：DTO、Socket 事件（含 `gomoku:undo`）、撤回资格、会话版本、业务常量与共享工具函数 |
 | `shared/dist/index.js` | — | 编译产物（dist/ 已 gitignore） |
 | `shared/dist/index.d.ts` | — | 类型声明产物（dist/ 已 gitignore） |
 
@@ -352,7 +353,7 @@ git 中只保留发布专用文件：
 | `deploy/server/package-lock.json` | 部署依赖锁文件 |
 | `deploy/server/README-SERVER.md` | 服务器部署与更新说明：部署包生成、宝塔 Windows 面板部署、环境变量、计划任务开机自启、故障排查 |
 | `deploy/server/server/.env.example` | **生产环境变量模板**（`NODE_ENV=production`、公网地址、Windows 路径 `C:\wwwroot\server\`），与开发版不同 |
-| `deploy/server/server/src/db/init.sql` | **MySQL 5.6 兼容版建表脚本**（4 处 `JSON`→`TEXT`，与源码版不同）。保留发布版，脚本不覆盖 |
+| `deploy/server/server/src/db/init.sql` | **MySQL 5.6 兼容版建表/迁移脚本**（4 处 `JSON`→`TEXT`，与源码版不同），同步包含 `last_undone_move_no` 幂等迁移。保留发布版，脚本不覆盖 |
 
 ---
 
@@ -390,8 +391,8 @@ git 中只保留发布专用文件：
 | 类别 | 数量 | 说明 |
 |------|------|------|
 | 配置文件 | ~16 | 根 + client/server/shared/electron + deploy 发布配置 |
-| 源代码文件 | ~60 | client + server + electron + shared |
-| 测试文件 | 26 | client 23 + Electron 2 + scripts 1，共 310 条用例 |
+| 源代码文件 | ~61 | client + server + electron + shared |
+| 测试文件 | 27 | client 24 + Electron 2 + scripts 1 |
 | 文档 | ~6 | docs/ 4 + README + deploy README 等 |
 | 静态资源 | ~18 | 精灵图、头像、神明图片、样式、图标、docs/assets 设计图 |
 | 工程脚本 | 5 | clean、build-server-deploy、dev-electron、create-mac-update-manifest + 1 测试 |

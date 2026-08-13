@@ -175,14 +175,20 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
   const userChanged = previousSessionIdentity.userId !== currentUserId;
   const isInitialUserResolution =
     !tokenChanged && previousSessionIdentity.userId === null && currentUserId !== null;
-  if (tokenChanged || (userChanged && !isInitialUserResolution)) {
+  if (tokenChanged) {
     sessionEpochRef.current += 1;
     deityDataVersionRef.current += 1;
   }
+  const accountChanged = userChanged && !isInitialUserResolution;
   sessionIdentityRef.current = { token, userId: currentUserId };
   const sessionEpoch = sessionEpochRef.current;
   const clearedSessionEpochRef = useRef(sessionEpoch);
   const appliedDivineSessionRequestIdRef = useRef(INITIAL_DIVINE_SESSION.requestId);
+
+  useEffect(() => {
+    dispatch({ type: "SET_DEITY_LOADING", payload: false });
+    dispatch({ type: "SET_DEITY_SUBMITTING_ID", payload: null });
+  }, [token]);
 
   // ---- 数据加载 ----
 
@@ -363,12 +369,11 @@ export function DeityProvider({ children }: { children: React.ReactNode }) {
   // ---- ⑧ 登出清理 ----
 
   useEffect(() => {
-    const sessionChanged = clearedSessionEpochRef.current !== sessionEpoch;
-    if (sessionChanged || !token || (!booting && !currentUserId)) {
+    if (accountChanged || !token || (!booting && !currentUserId)) {
       clearedSessionEpochRef.current = sessionEpoch;
       dispatch({ type: "CLEAR" });
     }
-  }, [token, currentUserId, booting, sessionEpoch]);
+  }, [accountChanged, token, currentUserId, booting, sessionEpoch]);
 
   // ---- Handler ----
 

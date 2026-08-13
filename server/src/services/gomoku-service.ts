@@ -15,6 +15,9 @@ interface GomokuGameRow extends RowDataPacket {
   current_turn: string | null;
   winner: string | null;
   board_state: string | number[][];
+  last_undone_move_no: number;
+  last_move_no: number | null;
+  last_move_player_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
   black_nickname: string;
@@ -23,6 +26,14 @@ interface GomokuGameRow extends RowDataPacket {
   white_nickname: string;
   white_avatar_url: string | null;
   white_created_at: Date | string;
+}
+
+interface GomokuMoveRow extends RowDataPacket {
+  id: number;
+  move_no: number;
+  player_id: string;
+  row_idx: number;
+  col_idx: number;
 }
 
 export class GomokuValidationError extends Error {}
@@ -101,6 +112,15 @@ function mapGameRow(row: GomokuGameRow): GomokuGame {
     currentTurn: row.current_turn,
     winner: row.winner,
     boardState: parseBoardState(row.board_state),
+    undoAvailableTo:
+      row.status === "playing" &&
+      row.current_turn !== null &&
+      row.last_move_no !== null &&
+      row.last_move_no > row.last_undone_move_no &&
+      row.last_move_player_id !== null &&
+      row.last_move_player_id !== row.current_turn
+        ? row.last_move_player_id
+        : null,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
     playerBlack: mapUserProfile({
@@ -128,6 +148,9 @@ const GAME_SELECT_SQL = `
     g.current_turn,
     g.winner,
     g.board_state,
+    g.last_undone_move_no,
+    lm.move_no AS last_move_no,
+    lm.player_id AS last_move_player_id,
     g.created_at,
     g.updated_at,
     ub.nickname AS black_nickname,
@@ -139,6 +162,13 @@ const GAME_SELECT_SQL = `
   FROM gomoku_games g
   INNER JOIN users ub ON ub.id = g.player_black
   INNER JOIN users uw ON uw.id = g.player_white
+  LEFT JOIN gomoku_moves lm
+    ON lm.game_id = g.id
+   AND lm.move_no = (
+     SELECT MAX(latest_move.move_no)
+     FROM gomoku_moves latest_move
+     WHERE latest_move.game_id = g.id
+   )
 `;
 
 async function loadGameById(gameId: number, connection?: PoolConnection): Promise<GomokuGame | null> {
@@ -329,11 +359,11 @@ export class GomokuService {
       const stone = userId === rowData.player_black ? 1 : 2;
       board[row][col] = stone;
 
-      const [moveCountRows] = await connection.query<Array<RowDataPacket & { count: number }>>(
-        "SELECT COUNT(*) AS count FROM gomoku_moves WHERE game_id = ?",
+      const [moveCountRows] = await connection.query<Array<RowDataPacket & { max_move_no: number | null }>>(
+        "SELECT MAX(move_no) AS max_move_no FROM gomoku_moves WHERE game_id = ?",
         [gameId]
       );
-      const nextMoveNo = Number(moveCountRows[0]?.count ?? 0) + 1;
+      const nextMoveNo = Number(moveCountRows[0]?.max_move_no ?? 0) + 1;
 
       await connection.execute(
         `INSERT INTO gomoku_moves (game_id, move_no, player_id, row_idx, col_idx)
@@ -365,6 +395,90 @@ export class GomokuService {
       const updated = await loadGameById(gameId);
       if (!updated) {
         throw new Error("Game not found after move.");
+      }
+      return updated;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async undoMove(gameId: number, userId: string): Promise<GomokuGame> {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [rows] = await connection.query<GomokuGameRow[]>(
+        `${GAME_SELECT_SQL}
+         WHERE g.id = ?
+         FOR UPDATE`,
+        [gameId]
+      );
+
+      if (rows.length === 0) {
+        throw new GomokuValidationError("Game not found.");
+      }
+
+      const rowData = rows[0];
+      if (rowData.status !== "playing") {
+        throw new GomokuValidationError("只有进行中的对局可以撤回。");
+      }
+      if (userId !== rowData.player_black && userId !== rowData.player_white) {
+        throw new GomokuValidationError("你不是本局玩家。");
+      }
+      if (rowData.current_turn === null || rowData.current_turn === userId) {
+        throw new GomokuValidationError("对方已经落子，当前不能撤回。");
+      }
+
+      const [moves] = await connection.query<GomokuMoveRow[]>(
+        `SELECT id, move_no, player_id, row_idx, col_idx
+         FROM gomoku_moves
+         WHERE game_id = ?
+         ORDER BY move_no DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [gameId]
+      );
+      const lastMove = moves[0];
+      if (!lastMove || lastMove.player_id !== userId) {
+        throw new GomokuValidationError("只能撤回自己刚落下的最后一手。");
+      }
+      if (lastMove.move_no <= rowData.last_undone_move_no) {
+        throw new GomokuValidationError("这一步已经撤回过，不能重复撤回。");
+      }
+
+      const board = parseBoardState(rowData.board_state);
+      const expectedStone = userId === rowData.player_black ? 1 : 2;
+      if (board[lastMove.row_idx]?.[lastMove.col_idx] !== expectedStone) {
+        throw new Error("Gomoku board state does not match the latest move.");
+      }
+      board[lastMove.row_idx][lastMove.col_idx] = 0;
+
+      const [deleteResult] = await connection.execute<ResultSetHeader>(
+        "DELETE FROM gomoku_moves WHERE id = ? AND game_id = ?",
+        [lastMove.id, gameId]
+      );
+      if (deleteResult.affectedRows !== 1) {
+        throw new Error("Failed to delete the latest gomoku move.");
+      }
+
+      await connection.execute(
+        `UPDATE gomoku_games
+         SET board_state = ?,
+             current_turn = ?,
+             last_undone_move_no = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [JSON.stringify(board), userId, lastMove.move_no, gameId]
+      );
+
+      await connection.commit();
+
+      const updated = await loadGameById(gameId);
+      if (!updated) {
+        throw new Error("Game not found after retracting move.");
       }
       return updated;
     } catch (error) {

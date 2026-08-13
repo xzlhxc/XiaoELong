@@ -5,6 +5,8 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export const ACCESS_TOKEN_SESSION_VERSION = 1;
+
 export const MOOD_OPTIONS = ["😊", "🥰", "😌", "😎", "🥳", "🤔", "😐", "😮‍💨", "😴", "😟", "😞", "😭", "😡", "😤", "😱", "🤒"] as const;
 
 export type MoodEmoji = (typeof MOOD_OPTIONS)[number];
@@ -55,6 +57,8 @@ export interface AuthJoinResponse {
 
 export interface AuthMeResponse {
   user: UserProfile;
+  /** Present when a valid legacy token is upgraded or the accepted token is close to expiry. */
+  accessToken?: string;
 }
 
 export interface AuthProfileUpdateResponse {
@@ -289,6 +293,8 @@ export interface GomokuGame {
   currentTurn: string | null;
   winner: string | null;
   boardState: number[][];
+  /** The player who may currently retract the latest move, or null when no retraction is allowed. */
+  undoAvailableTo: string | null;
   invitedBy: string;
   createdAt: string;
   updatedAt: string;
@@ -360,6 +366,10 @@ export interface GomokuMovePayload {
   col: number;
 }
 
+export interface GomokuUndoPayload {
+  gameId: number;
+}
+
 export interface GomokuUpdatePayload {
   game: GomokuGame;
 }
@@ -397,4 +407,5 @@ export interface ClientToServerEvents {
   "gomoku:accept": (payload: GomokuAcceptPayload, ack?: (result: GomokuAck) => void) => void;
   "gomoku:reject": (payload: GomokuRejectPayload, ack?: (result: GomokuAck) => void) => void;
   "gomoku:move": (payload: GomokuMovePayload, ack?: (result: GomokuAck) => void) => void;
+  "gomoku:undo": (payload: GomokuUndoPayload, ack?: (result: GomokuAck) => void) => void;
 }

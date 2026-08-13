@@ -24,6 +24,10 @@ const moveSchema = z.object({
   col: z.coerce.number().int().min(0).max(14)
 });
 
+const undoSchema = z.object({
+  gameId: z.coerce.number().int().positive()
+});
+
 export function createGomokuRouter(
   io: Server<ClientToServerEvents, ServerToClientEvents>,
   service: GomokuService
@@ -133,6 +137,31 @@ export function createGomokuRouter(
 
     try {
       const game = await service.makeMove(parsed.data.gameId, req.user.id, parsed.data.row, parsed.data.col);
+      emitGomokuUpdate(io, game);
+      res.json({ game });
+    } catch (error) {
+      if (error instanceof GomokuValidationError) {
+        res.status(409).json({ message: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/undo", requireAuth, async (req, res, next) => {
+    if (!req.user) {
+      res.status(401).json({ message: "Unauthorized." });
+      return;
+    }
+
+    const parsed = undoSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid undo payload." });
+      return;
+    }
+
+    try {
+      const game = await service.undoMove(parsed.data.gameId, req.user.id);
       emitGomokuUpdate(io, game);
       res.json({ game });
     } catch (error) {

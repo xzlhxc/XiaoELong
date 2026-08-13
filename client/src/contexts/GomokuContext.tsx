@@ -97,6 +97,7 @@ function areGamesEqual(left: GomokuGame, right: GomokuGame): boolean {
     left.status === right.status &&
     left.currentTurn === right.currentTurn &&
     left.winner === right.winner &&
+    left.undoAvailableTo === right.undoAvailableTo &&
     left.invitedBy === right.invitedBy &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&
@@ -127,7 +128,7 @@ export function upsertGame(list: GomokuGame[], game: GomokuGame): GomokuGame[] {
 
 async function emitWithAck<T>(
   socket: AppSocket,
-  event: "gomoku:invite" | "gomoku:accept" | "gomoku:reject" | "gomoku:move",
+  event: "gomoku:invite" | "gomoku:accept" | "gomoku:reject" | "gomoku:move" | "gomoku:undo",
   payload: Record<string, unknown>
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -212,6 +213,7 @@ export interface GomokuContextValue extends GomokuState {
   accept: (gameId: number) => Promise<void>;
   reject: (gameId: number) => Promise<void>;
   move: (gameId: number, row: number, col: number) => Promise<boolean>;
+  undo: (gameId: number) => Promise<boolean>;
   refresh: () => Promise<void>;
   clear: () => void;
 }
@@ -235,15 +237,20 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
   const userChanged = previousSessionIdentity.userId !== currentUserId;
   const isInitialUserResolution =
     !tokenChanged && previousSessionIdentity.userId === null && currentUserId !== null;
-  if (tokenChanged || (userChanged && !isInitialUserResolution)) {
+  if (tokenChanged) {
     sessionEpochRef.current += 1;
   }
+  const accountChanged = userChanged && !isInitialUserResolution;
   sessionIdentityRef.current = { token, userId: currentUserId };
   const sessionEpoch = sessionEpochRef.current;
   const clearedSessionEpochRef = useRef(sessionEpoch);
 
-  // 防重复落子：同一对局提交期间加锁
-  const pendingGomokuMoveIdsRef = useRef<Set<number>>(new Set());
+  // 同一对局的落子与撤回必须互斥，避免双击或两种操作并发提交。
+  const pendingGomokuMutationIdsRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    pendingGomokuMutationIdsRef.current.clear();
+  }, [token]);
 
   // ---- 加载对局列表 ----
 
@@ -338,13 +345,12 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
   // ---- ② 登出清理 ----
 
   useEffect(() => {
-    const sessionChanged = clearedSessionEpochRef.current !== sessionEpoch;
-    if (sessionChanged || !token || !currentUserId) {
+    if (accountChanged || !token || !currentUserId) {
       clearedSessionEpochRef.current = sessionEpoch;
-      pendingGomokuMoveIdsRef.current.clear();
+      pendingGomokuMutationIdsRef.current.clear();
       dispatch({ type: "CLEAR" });
     }
-  }, [token, currentUserId, sessionEpoch]);
+  }, [accountChanged, token, currentUserId, sessionEpoch]);
 
   useEffect(() => {
     if (currentUser && currentUser.id === currentUserId) {
@@ -465,13 +471,13 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "SET_ERROR", payload: "连接未建立，无法落子。" });
       return false;
     }
-    if (pendingGomokuMoveIdsRef.current.has(gameId)) {
+    if (pendingGomokuMutationIdsRef.current.has(gameId)) {
       return false;
     }
 
     const requestSessionEpoch = sessionEpochRef.current;
     const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
-    pendingGomokuMoveIdsRef.current.add(gameId);
+    pendingGomokuMutationIdsRef.current.add(gameId);
     dispatch({ type: "SET_ERROR", payload: null });
     try {
       const result = await emitWithAck<{ game: GomokuGame }>(socket, "gomoku:move", { gameId, row, col });
@@ -487,7 +493,48 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
       return false;
     } finally {
       if (isRequestCurrent()) {
-        pendingGomokuMoveIdsRef.current.delete(gameId);
+        pendingGomokuMutationIdsRef.current.delete(gameId);
+      }
+    }
+  }, [token, currentUserId]);
+
+  const undo = useCallback(async (gameId: number): Promise<boolean> => {
+    const socket = getSharedSocket();
+    if (
+      !token ||
+      !currentUserId ||
+      sessionIdentityRef.current.token !== token ||
+      sessionIdentityRef.current.userId !== currentUserId
+    ) {
+      return false;
+    }
+    if (!socket) {
+      dispatch({ type: "SET_ERROR", payload: "连接未建立，无法撤回落子。" });
+      return false;
+    }
+    if (pendingGomokuMutationIdsRef.current.has(gameId)) {
+      return false;
+    }
+
+    const requestSessionEpoch = sessionEpochRef.current;
+    const isRequestCurrent = (): boolean => requestSessionEpoch === sessionEpochRef.current;
+    pendingGomokuMutationIdsRef.current.add(gameId);
+    dispatch({ type: "SET_ERROR", payload: null });
+    try {
+      const result = await emitWithAck<{ game: GomokuGame }>(socket, "gomoku:undo", { gameId });
+      if (isRequestCurrent()) {
+        dispatch({ type: "UPSERT_GAME", payload: result.game });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      if (isRequestCurrent()) {
+        dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "撤回落子失败。" });
+      }
+      return false;
+    } finally {
+      if (isRequestCurrent()) {
+        pendingGomokuMutationIdsRef.current.delete(gameId);
       }
     }
   }, [token, currentUserId]);
@@ -495,7 +542,7 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
   const clear = useCallback((): void => {
     sessionEpochRef.current += 1;
     clearedSessionEpochRef.current = sessionEpochRef.current;
-    pendingGomokuMoveIdsRef.current.clear();
+    pendingGomokuMutationIdsRef.current.clear();
     dispatch({ type: "CLEAR" });
   }, []);
 
@@ -509,10 +556,11 @@ export function GomokuProvider({ children }: { children: React.ReactNode }) {
       accept,
       reject,
       move,
+      undo,
       refresh,
       clear
     }),
-    [state, selectGame, invite, accept, reject, move, refresh, clear]
+    [state, selectGame, invite, accept, reject, move, undo, refresh, clear]
   );
 
   return <GomokuContext.Provider value={value}>{children}</GomokuContext.Provider>;

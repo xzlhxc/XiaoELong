@@ -4,17 +4,16 @@
 
 小鳄龙是一个给固定小群使用的 Windows/macOS 桌面伴侣。它用 Electron 提供桌面悬浮入口，React/Vite 渲染界面，Express + Socket.io 提供前后端连接。后端采用 MySQL 持久化数据。目前主要功能包括：聊天室、每日问题、每日心情、膜拜、五子棋等。
 
-当前版本：`2.1.0`
+当前版本：`2.1.1`
 
-## 2.1.0 更新要点
+## 2.1.1 更新要点
 
-- 前端架构重构
-- 仓库目录优化整理
-- 新增前端测试
-- Electron 依赖升级
-- 新增开发文档
-- 修复账号切换时的异步状态串号，并完善 Windows 服务器部署脚本
-- 恢复“汇聚星轨”、五子棋交叉点落子及长图完整查看/缩放
+- 有效的旧版登录凭证会自动升级为当前有效期，新版凭证临近到期时自动续签。
+- Electron 多窗口通过原子会话同步切换凭证，续签时保留聊天、神选和五子棋界面状态。
+- 自动失效只清理实际返回 `401` 的旧凭证，数据库临时故障不会误登出用户。
+- 五子棋支持在对方回应前撤回自己刚落下的最后一手，并阻止连续或重复撤回；每日一题与五子棋刷新时保留当前内容，以短暂的“刷新中…”状态代替闪屏。
+- 每日一题的 DeepSeek 生成改为严格 JSON 重试：附图结构与校验保持一致，最后一次会生成无附图题；同一日期的并发请求会合并为一次生成。
+- 本版没有依赖变化，但新增 `gomoku_games.last_undone_move_no` 字段；升级时必须先执行 `db:init`，再启动新版服务端，最后发布客户端，可以跳过 `npm install`。
 
 （详细见 [版本历史](CHANGELOG.md) ）
 
@@ -191,7 +190,7 @@ npm.cmd run build:cloud
 npm.cmd run server:deploy
 ```
 
-该命令会先定向清理 `server/dist` 和 `shared/dist`，重新构建后生成 `deploy/XiaoELong-server-2.1.0.zip`。Windows 使用系统自带的 PowerShell/.NET 压缩，无需额外安装 `zip`；macOS/Linux 需要系统提供 `zip` 命令。脚本会先生成同目录临时 ZIP，成功后才替换正式包，失败时保留上一份正式包。
+该命令会先定向清理 `server/dist` 和 `shared/dist`，重新构建后生成 `deploy/XiaoELong-server-2.1.1.zip`。Windows 使用系统自带的 PowerShell/.NET 压缩，无需额外安装 `zip`；macOS/Linux 需要系统提供 `zip` 命令。脚本会先生成同目录临时 ZIP，成功后才替换正式包，失败时保留上一份正式包。
 
 生成 Electron unpacked 目录包，适合本机快速测试：
 
@@ -213,7 +212,7 @@ npm.cmd run electron:dist
 npm run electron:dist:mac
 ```
 
-该命令会在 `release/` 下生成 `XiaoELong-2.1.0-mac-universal.dmg`、`XiaoELong-2.1.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.1.0-mac-universal` 的 Actions 产物。
+该命令会在 `release/` 下生成 `XiaoELong-2.1.1-mac-universal.dmg`、`XiaoELong-2.1.1-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.1.1-mac-universal` 的 Actions 产物。
 
 下载并解压 Actions 产物后，可在 macOS 终端校验安装包：
 
@@ -235,7 +234,7 @@ xattr -dr com.apple.quarantine /Applications/XiaoELong.app
 - 浏览器下载完成后，完全退出旧版 XiaoELong，打开 DMG，将应用拖入“应用程序”并选择替换，再重新打开。登录信息和本机设置保存在用户数据目录中，正常覆盖应用不会清除它们。
 - 这是“检查版本 + 打开可信下载链接”，不是静默自动安装；未签名应用若要使用 Electron 的完整自动更新，仍需 Apple Developer 证书、签名和公证。
 - 已经发出的 `1.3.1` 不包含检查逻辑，必须手动安装一次 `1.3.2` 或更新版本；从 `1.3.2` 开始才会提示后续版本。
-- 发布时将 DMG 上传到标签为 `v2.1.0` 的 GitHub Release，再把 Actions 生成的 `latest-mac.json` 上传到服务器更新目录。不要上传 `latest-mac.yml`，它不用于当前的 Mac 手动更新流程。
+- 发布时将 DMG 上传到标签为 `v2.1.1` 的 GitHub Release，再把 Actions 生成的 `latest-mac.json` 上传到服务器更新目录。不要上传 `latest-mac.yml`，它不用于当前的 Mac 手动更新流程。
 - Windows 自动更新不受影响。若用户网络无法访问 GitHub，仍可直接向其发送 DMG。
 
 `build` 会先运行 `clean`，避免旧的 `dist` 文件混入发布产物。
@@ -243,12 +242,12 @@ xattr -dr com.apple.quarantine /Applications/XiaoELong.app
 ## 当前功能
 
 - 邀请码入群：用户输入邀请码、昵称、可选头像后获得 JWT。
-- 会话恢复：客户端保存 token，启动后通过 `GET /api/auth/me` 恢复身份。
+- 会话恢复与续签：客户端保存 token，启动后通过 `GET /api/auth/me` 恢复身份。仍有效的旧版 token 会在首次校验时升级；新版 token 至多提前 7 天自动续签（短期凭证按有效期比例提前），并同步到桌面端各窗口。
 - 在线状态：Socket 握手校验 token，服务端维护多窗口在线状态。
 - 实时聊天：文字、图片和普通文件附件，历史消息从数据库加载；支持右键引用消息、引用预览与跳转原消息。
 - 每日心情：每日选择一次心情，在线成员实时同步。
-- 每日问题：每天一道大学生向四选一题，支持 DeepSeek 生成、本地 fallback、逻辑/语文常识权重控制和结构化附图模板。
-- 五子棋：邀请、接受、落子、胜负判定和实时更新。
+- 每日问题：每天一道大学生向四选一题，支持 DeepSeek 生成、本地 fallback、逻辑/语文常识权重控制和结构化附图模板；手动刷新保留当前题目并显示稳定的刷新状态。
+- 五子棋：邀请、接受、落子、胜负判定、实时更新和受服务端约束的单步撤回；刷新对局时保留现有列表与棋盘。
 - 桌面壳：悬浮 Avatar、独立面板、设置、开机自启、图片查看器。
 
 ## 服务端接口概览
@@ -272,11 +271,12 @@ REST：
 - `POST /api/gomoku/accept`
 - `POST /api/gomoku/reject`
 - `POST /api/gomoku/move`
+- `POST /api/gomoku/undo`
 
 Socket：
 
 - 服务端推送：`presence:init`、`presence:online`、`presence:offline`、`user:update`、`chat:message`、`question:update`、`mood:update`、`gomoku:update`、`gomoku:end`
-- 客户端发送：`chat:send`、`gomoku:invite`、`gomoku:accept`、`gomoku:reject`、`gomoku:move`
+- 客户端发送：`chat:send`、`gomoku:invite`、`gomoku:accept`、`gomoku:reject`、`gomoku:move`、`gomoku:undo`
 
 共享类型集中在 `shared/src/index.ts`，前后端应优先复用这里的接口契约。
 

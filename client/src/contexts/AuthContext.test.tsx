@@ -127,26 +127,98 @@ describe("authReducer", () => {
     expect(next.sessionRestoreError).toBeNull();
   });
 
-  it("SESSION_USER_READY 设置 currentUser, booting=false", () => {
-    const state = makeState({ booting: true, currentUser: null });
+  it("SESSION_BOOTSTRAP 后台续签时保留已登录界面", () => {
+    const currentUser = { id: "u1", nickname: "测试", avatarUrl: null, createdAt: "2026-01-01" };
+    const state = makeState({
+      token: "active-token",
+      currentUser,
+      booting: false,
+      sessionRestoreError: "旧错误"
+    });
+    const next = authReducer(state, { type: "SESSION_BOOTSTRAP" });
+    expect(next.currentUser).toBe(currentUser);
+    expect(next.booting).toBe(false);
+    expect(next.sessionRestoreError).toBeNull();
+  });
+
+  it("SESSION_USER_READY 原子替换续签 token 和 currentUser", () => {
+    const state = makeState({ token: "old-token", booting: true, currentUser: null });
     const user = { id: "u1", nickname: "测试", avatarUrl: null, createdAt: "2026-01-01" };
-    const action: AuthAction = { type: "SESSION_USER_READY", payload: user };
+    const action: AuthAction = {
+      type: "SESSION_USER_READY",
+      payload: { requestToken: "old-token", token: "renewed-token", user }
+    };
     const next = authReducer(state, action);
+    expect(next.token).toBe("renewed-token");
     expect(next.currentUser).toEqual(user);
     expect(next.booting).toBe(false);
+  });
+
+  it("SESSION_USER_READY 忽略已经切换会话的旧续签响应", () => {
+    const currentUser = { id: "u2", nickname: "当前用户", avatarUrl: null, createdAt: "2026-01-01" };
+    const staleUser = { id: "u1", nickname: "旧用户", avatarUrl: null, createdAt: "2026-01-01" };
+    const state = makeState({ token: "current-token", currentUser, booting: false });
+    const action: AuthAction = {
+      type: "SESSION_USER_READY",
+      payload: { requestToken: "stale-token", token: "stale-renewed-token", user: staleUser }
+    };
+
+    expect(authReducer(state, action)).toBe(state);
+  });
+
+  it("SESSION_TOKEN_REFRESHED 只替换匹配会话的 token 并保留用户", () => {
+    const currentUser = { id: "u1", nickname: "当前用户", avatarUrl: null, createdAt: "2026-01-01" };
+    const state = makeState({
+      token: "old-token",
+      currentUser,
+      booting: false,
+      sessionRestoreError: "旧错误"
+    });
+    const next = authReducer(state, {
+      type: "SESSION_TOKEN_REFRESHED",
+      payload: { expectedToken: "old-token", renewedToken: "new-token" }
+    });
+
+    expect(next.token).toBe("new-token");
+    expect(next.currentUser).toBe(currentUser);
+    expect(next.booting).toBe(false);
+    expect(next.sessionRestoreError).toBeNull();
+  });
+
+  it("SESSION_TOKEN_REFRESHED 忽略不匹配的旧会话广播", () => {
+    const state = makeState({ token: "current-token" });
+    const action: AuthAction = {
+      type: "SESSION_TOKEN_REFRESHED",
+      payload: { expectedToken: "stale-token", renewedToken: "stale-new-token" }
+    };
+
+    expect(authReducer(state, action)).toBe(state);
   });
 
   // ---- 错误路径 ----
 
   it("SESSION_RESTORE_ERROR 设置错误, booting=false", () => {
-    const state = makeState({ booting: true, sessionRestoreError: null });
+    const state = makeState({ token: "active-token", booting: true, sessionRestoreError: null });
     const action: AuthAction = {
       type: "SESSION_RESTORE_ERROR",
-      payload: "暂时无法连接服务器，登录状态已保留，将自动重试。"
+      payload: {
+        requestToken: "active-token",
+        message: "暂时无法连接服务器，登录状态已保留，将自动重试。"
+      }
     };
     const next = authReducer(state, action);
     expect(next.sessionRestoreError).toBe("暂时无法连接服务器，登录状态已保留，将自动重试。");
     expect(next.booting).toBe(false);
+  });
+
+  it("SESSION_RESTORE_ERROR 忽略已经切换会话的旧失败响应", () => {
+    const state = makeState({ token: "current-token", booting: true, sessionRestoreError: null });
+    const action: AuthAction = {
+      type: "SESSION_RESTORE_ERROR",
+      payload: { requestToken: "stale-token", message: "旧请求失败" }
+    };
+
+    expect(authReducer(state, action)).toBe(state);
   });
 
   it("PROFILE_UPDATE_FAILURE 设置 profileError, 清除保存态", () => {

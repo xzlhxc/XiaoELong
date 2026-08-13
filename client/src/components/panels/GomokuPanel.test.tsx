@@ -40,6 +40,7 @@ function makeGame(overrides: Partial<GomokuGame> = {}): GomokuGame {
     playerWhite: makeUser("u2", "小白"),
     currentTurn: "u1",
     winner: null,
+    undoAvailableTo: null,
     boardState: emptyBoard,
     invitedBy: "u2",
     createdAt: "2026-08-11T00:00:00.000Z",
@@ -53,6 +54,7 @@ let invite: ReturnType<typeof vi.fn>;
 let accept: ReturnType<typeof vi.fn>;
 let reject: ReturnType<typeof vi.fn>;
 let move: ReturnType<typeof vi.fn>;
+let undo: ReturnType<typeof vi.fn>;
 let refresh: ReturnType<typeof vi.fn>;
 
 function mockGomoku(overrides: Partial<Pick<GomokuContextValue, "games" | "selectedGameId" | "loading" | "error">> = {}): void {
@@ -66,6 +68,7 @@ function mockGomoku(overrides: Partial<Pick<GomokuContextValue, "games" | "selec
     accept,
     reject,
     move,
+    undo,
     refresh,
     ...overrides
   } as unknown as GomokuContextValue);
@@ -77,7 +80,8 @@ beforeEach(() => {
   accept = vi.fn().mockResolvedValue(undefined);
   reject = vi.fn().mockResolvedValue(undefined);
   move = vi.fn().mockResolvedValue(true);
-  refresh = vi.fn();
+  undo = vi.fn().mockResolvedValue(true);
+  refresh = vi.fn().mockResolvedValue(undefined);
 
   mockedUseAuth.mockReturnValue({ currentUser: makeUser("u1", "小明") } as unknown as AuthContextValue);
   mockedUseChat.mockReturnValue({ presenceUsers: [] } as unknown as ChatContextValue);
@@ -95,13 +99,16 @@ afterEach(() => {
 // ============================================================
 
 describe("GomokuPanel 正常路径", () => {
-  it("有对局时渲染对局列表、选中棋盘与对手信息", () => {
+  it("有对局时渲染左侧状态、选中棋盘与执棋信息", () => {
     const game = makeGame({ status: "playing", currentTurn: "u1" });
     mockGomoku({ games: [game], selectedGameId: game.id });
-    render(<GomokuPanel />);
+    const { container } = render(<GomokuPanel />);
 
-    expect(screen.getByText(/对手：小白，你执黑/)).toBeTruthy();
-    expect(screen.getAllByText("轮到小黑行棋").length).toBeGreaterThan(0);
+    expect(screen.getByText("轮到小黑行棋")).toBeTruthy();
+    const gameHead = container.querySelector(".gomoku-game-head");
+    expect(gameHead?.textContent).toBe("你执黑");
+    expect(gameHead?.textContent).not.toContain("对手：");
+    expect(gameHead?.textContent).not.toContain("轮到");
     expect(screen.getByRole("grid")).toBeTruthy();
   });
 
@@ -161,12 +168,24 @@ describe("GomokuPanel 正常路径", () => {
     await waitFor(() => expect(screen.queryByText("选择成员")).toBeNull());
   });
 
-  it("点击刷新调用 refresh", () => {
+  it("点击刷新调用 refresh，并立即显示稳定的刷新状态", () => {
     mockGomoku({ games: [], selectedGameId: null });
     render(<GomokuPanel />);
 
-    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    const refreshButton = screen.getByRole("button", { name: "刷新" }) as HTMLButtonElement;
+    fireEvent.click(refreshButton);
     expect(refresh).toHaveBeenCalled();
+    expect(screen.getByText("刷新中")).toBeTruthy();
+    expect(refreshButton.disabled).toBe(true);
+  });
+
+  it("只有本人刚落且对方未行棋时显示撤回按钮并调用 undo", async () => {
+    const game = makeGame({ id: 7, currentTurn: "u2", undoAvailableTo: "u1" });
+    mockGomoku({ games: [game], selectedGameId: game.id });
+    render(<GomokuPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "撤回" }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith(7));
   });
 });
 
@@ -202,6 +221,18 @@ describe("GomokuPanel 边界条件", () => {
     expect(candidate.disabled).toBe(true);
     expect(candidate.textContent).toContain("对局进行中");
   });
+
+  it("撤回资格属于对方或不存在时不显示撤回按钮", () => {
+    const game = makeGame({ currentTurn: "u1", undoAvailableTo: "u2" });
+    mockGomoku({ games: [game], selectedGameId: game.id });
+    render(<GomokuPanel />);
+
+    expect(screen.queryByRole("button", { name: "撤回" })).toBeNull();
+    const placeholder = document.querySelector(".gomoku-undo-slot > .gomoku-undo-button.is-placeholder") as HTMLButtonElement;
+    expect(placeholder).toBeTruthy();
+    expect(placeholder.disabled).toBe(true);
+    expect(placeholder.tabIndex).toBe(-1);
+  });
 });
 
 // ============================================================
@@ -215,10 +246,18 @@ describe("GomokuPanel 错误路径", () => {
     expect(screen.getByText("加载失败")).toBeTruthy();
   });
 
-  it("loading 时显示加载中", () => {
-    mockGomoku({ games: [], selectedGameId: null, loading: true });
-    render(<GomokuPanel />);
-    expect(screen.getByText("加载中...")).toBeTruthy();
+  it("loading 时在邀请左侧显示刷新中，并保留已有对局", () => {
+    const game = makeGame();
+    mockGomoku({ games: [game], selectedGameId: game.id, loading: true });
+    const { container } = render(<GomokuPanel />);
+
+    expect(screen.getByText("刷新中")).toBeTruthy();
+    expect(screen.queryByText("加载中...")).toBeNull();
+    expect(screen.getAllByText("小白").length).toBeGreaterThan(0);
+    const actions = container.querySelector(".gomoku-actions");
+    expect(actions?.children[0].classList.contains("module-refresh-status")).toBe(true);
+    expect(actions?.children[1].classList.contains("invite-popover-wrap")).toBe(true);
+    expect((screen.getByRole("button", { name: "刷新" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
@@ -247,5 +286,19 @@ describe("GomokuPanel 状态转换", () => {
     await act(async () => {
       resolveInvite();
     });
+  });
+
+  it("undo 挂起期间按钮保持撤回文案并禁用", async () => {
+    let resolveUndo: (value: boolean) => void = () => {};
+    undo.mockReturnValue(new Promise<boolean>((resolve) => { resolveUndo = resolve; }));
+    const game = makeGame({ id: 7, currentTurn: "u2", undoAvailableTo: "u1" });
+    mockGomoku({ games: [game], selectedGameId: game.id });
+    render(<GomokuPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "撤回" }));
+    const pendingButton = screen.getByRole("button", { name: "撤回" }) as HTMLButtonElement;
+    expect(pendingButton.disabled).toBe(true);
+    expect(pendingButton.getAttribute("aria-busy")).toBe("true");
+    await act(async () => resolveUndo(true));
   });
 });
