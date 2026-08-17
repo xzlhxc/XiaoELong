@@ -45,6 +45,13 @@ const MAX_PANEL_CONTENT_EXTRA_HEIGHT = 300;
 const DESKTOP_MARGIN_RIGHT = 28;
 const DESKTOP_MARGIN_BOTTOM = 34;
 const PET_DISPLAY_MODES = new Set(["dynamic", "static", "image"]);
+const COLOR_THEMES = new Set([
+  "melonStone",
+  "lemonMist",
+  "peachIndigo",
+  "orangePurple",
+  "creamGray"
+]);
 
 let authWindow = null;
 let authWindowReady = false;
@@ -67,6 +74,8 @@ let panelPlacement = "upper-left";
 let currentWindowMode = "auth";
 let currentPanelView = "home";
 let panelAlwaysOnTop = true;
+let colorTheme = "melonStone";
+let panelLayout = "classic";
 let petDisplayMode = "image";
 let petDisplayModePersisted = false;
 let panelRendererReady = false;
@@ -111,10 +120,14 @@ function getDesktopSettingsFilePath() {
 }
 
 function loadPersistedDesktopSettings() {
+  colorTheme = "melonStone";
+  panelLayout = "classic";
   petDisplayMode = "image";
   petDisplayModePersisted = false;
   try {
     const parsed = JSON.parse(fs.readFileSync(getDesktopSettingsFilePath(), "utf8"));
+    colorTheme = COLOR_THEMES.has(parsed?.colorTheme) ? parsed.colorTheme : "melonStone";
+    panelLayout = parsed?.panelLayout === "guo" ? "guo" : "classic";
     const hasDisplayMode = parsed !== null
       && typeof parsed === "object"
       && Object.prototype.hasOwnProperty.call(parsed, "petDisplayMode");
@@ -138,6 +151,8 @@ function persistDesktopSettings() {
     fs.writeFileSync(
       temporaryFile,
       JSON.stringify({
+        colorTheme,
+        panelLayout,
         petDisplayMode,
         petAnimationsEnabled: petDisplayMode === "dynamic"
       }),
@@ -388,6 +403,8 @@ function getDesktopSettings() {
   return {
     openAtLogin: isDevelopment ? false : app.getLoginItemSettings().openAtLogin,
     panelAlwaysOnTop,
+    colorTheme,
+    panelLayout,
     petDisplayMode,
     petAnimationsEnabled: petDisplayMode === "dynamic",
     petDisplayModePersisted
@@ -629,6 +646,21 @@ function setPanelAlwaysOnTop(enabled) {
   if (panelWindow && !panelWindow.isDestroyed()) {
     panelWindow.setAlwaysOnTop(panelAlwaysOnTop);
   }
+  broadcastSettings();
+}
+
+function setColorTheme(theme) {
+  if (!COLOR_THEMES.has(theme)) {
+    return;
+  }
+  colorTheme = theme;
+  persistDesktopSettings();
+  broadcastSettings();
+}
+
+function setPanelLayout(layout) {
+  panelLayout = layout === "guo" ? "guo" : "classic";
+  persistDesktopSettings();
   broadcastSettings();
 }
 
@@ -956,6 +988,7 @@ function createAvatarWindow() {
     minHeight: AVATAR_HEIGHT,
     maxHeight: AVATAR_HEIGHT,
     frame: false,
+    thickFrame: false,
     transparent: true,
     backgroundColor: "#00000000",
     resizable: false,
@@ -1854,6 +1887,16 @@ ipcMain.handle("desktop:settings:set-login-at-startup", (_event, enabled) => {
 
 ipcMain.handle("desktop:settings:set-panel-always-on-top", (_event, enabled) => {
   setPanelAlwaysOnTop(Boolean(enabled));
+  return getDesktopSettings();
+});
+
+ipcMain.handle("desktop:settings:set-color-theme", (_event, theme) => {
+  setColorTheme(theme);
+  return getDesktopSettings();
+});
+
+ipcMain.handle("desktop:settings:set-panel-layout", (_event, layout) => {
+  setPanelLayout(layout);
   return getDesktopSettings();
 });
 

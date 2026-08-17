@@ -127,7 +127,16 @@ function getMessagePreview(message: Pick<ChatMessage, "content" | "image" | "fil
 
 export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const { currentUserId } = useAuth();
-  const { messages, sendError, scrollMemoryRef, sendMessage: onSendMessage } = useChat();
+  const {
+    messages,
+    sendError,
+    hasOlderMessages,
+    loadingOlderMessages,
+    olderMessagesError,
+    loadOlderMessages,
+    scrollMemoryRef,
+    sendMessage: onSendMessage
+  } = useChat();
   const [content, setContent] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [fileFile, setFileFile] = useState<File | null>(null);
@@ -157,6 +166,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const coldStartScrollRef = useRef(scrollMemoryRef.current === null);
   const startupBaselineInitializedRef = useRef(false);
   const startupBottomPendingRef = useRef(scrollMemoryRef.current === null);
+  const olderHistoryAnchorRef = useRef<{ messageId: number; offset: number } | null>(null);
   const panelVisibleRef = useRef(
     window.xiaoelongDesktop?.role === "panel"
       ? (window.xiaoelongDesktop.getPanelVisibility?.() ?? document.visibilityState === "visible")
@@ -175,6 +185,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const renderedMessagesRef = useRef(renderedMessages);
   renderedMessagesRef.current = renderedMessages;
   const knownMessageIdsRef = useRef<Set<number>>(new Set());
+  const oldestMessageIdRef = useRef<number | null>(renderedMessages[0]?.id ?? null);
   const imageMessages = useMemo(
     () =>
       renderedMessages.flatMap((message) =>
@@ -414,6 +425,36 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     if (!list) {
       return;
     }
+
+    if (loadingOlderMessages && olderHistoryAnchorRef.current) {
+      const listBounds = list.getBoundingClientRect();
+      const visibleMessageElement = Array.from(
+        list.querySelectorAll<HTMLElement>("[data-message-id]")
+      ).find((element) => element.getBoundingClientRect().bottom > listBounds.top);
+      const visibleMessageId = visibleMessageElement
+        ? Number(visibleMessageElement.dataset.messageId)
+        : Number.NaN;
+      if (visibleMessageElement && Number.isSafeInteger(visibleMessageId)) {
+        olderHistoryAnchorRef.current = {
+          messageId: visibleMessageId,
+          offset: visibleMessageElement.getBoundingClientRect().top - listBounds.top
+        };
+      }
+    }
+
+    if (list.scrollTop <= 28 && hasOlderMessages && !loadingOlderMessages) {
+      const firstMessage = renderedMessagesRef.current[0];
+      const firstMessageElement = firstMessage ? getMessageElement(firstMessage.id) : null;
+      if (firstMessage && firstMessageElement) {
+        const listBounds = list.getBoundingClientRect();
+        olderHistoryAnchorRef.current = {
+          messageId: firstMessage.id,
+          offset: firstMessageElement.getBoundingClientRect().top - listBounds.top
+        };
+      }
+      void loadOlderMessages();
+    }
+
     const distanceToBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
     const isAtBottom = distanceToBottom <= 28;
     if (isAtBottom) {
@@ -535,6 +576,22 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     const knownMessageIds = knownMessageIdsRef.current;
     const newlyRenderedMessages = renderedMessages.filter((message) => !knownMessageIds.has(message.id));
     knownMessageIdsRef.current = new Set(renderedMessages.map((message) => message.id));
+    const previousOldestMessageId = oldestMessageIdRef.current;
+    oldestMessageIdRef.current = renderedMessages[0]?.id ?? null;
+
+    const olderHistoryAnchor = olderHistoryAnchorRef.current;
+    const insertedOlderHistory = previousOldestMessageId !== null
+      && newlyRenderedMessages.some((message) => message.id < previousOldestMessageId);
+    if (olderHistoryAnchor && insertedOlderHistory) {
+      const list = listRef.current;
+      const anchorElement = getMessageElement(olderHistoryAnchor.messageId);
+      if (list && anchorElement) {
+        const listBounds = list.getBoundingClientRect();
+        const nextOffset = anchorElement.getBoundingClientRect().top - listBounds.top;
+        list.scrollTop += nextOffset - olderHistoryAnchor.offset;
+      }
+      olderHistoryAnchorRef.current = null;
+    }
 
     if (coldStartScrollRef.current && !startupBaselineInitializedRef.current && latestMessage) {
       startupBaselineInitializedRef.current = true;
@@ -629,7 +686,9 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
       return;
     }
 
-    const addedMessages = newlyRenderedMessages;
+    const addedMessages = previousOldestMessageId === null
+      ? newlyRenderedMessages
+      : newlyRenderedMessages.filter((message) => message.id >= previousOldestMessageId);
     lastMessageIdRef.current = latestMessage.id;
 
     if (addedMessages.length === 0) {
@@ -674,6 +733,12 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     setLiveNewMessageState(firstLiveMessageId, liveMessageCount);
     captureScrollMemory();
   }, [renderedMessages, currentUserId, scrollMemoryRef]);
+
+  useEffect(() => {
+    if (!loadingOlderMessages) {
+      olderHistoryAnchorRef.current = null;
+    }
+  }, [loadingOlderMessages, hasOlderMessages, olderMessagesError]);
 
   useLayoutEffect(() => {
     return () => {
@@ -892,6 +957,19 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
         ) : null}
       </div>
       <div className="chat-list" ref={listRef} onScroll={updateBottomState}>
+        <div className="chat-history-status" role="status" aria-live="polite">
+          {loadingOlderMessages
+            ? "正在加载更早的消息…"
+            : olderMessagesError
+              ? (
+                  <button type="button" onClick={() => void loadOlderMessages()}>
+                    加载失败，点击重试
+                  </button>
+                )
+              : !hasOlderMessages && renderedMessages.length > 0
+                ? "已经到最早的消息了"
+                : ""}
+        </div>
         {renderedMessages.map((message) => {
           const isMine = message.user.id === currentUserId;
           const replyTo = message.replyTo;

@@ -113,6 +113,7 @@ const Board = memo(function Board(props: {
 }): JSX.Element {
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const [keyboardCell, setKeyboardCell] = useState({ row: 7, col: 7 });
+  const [keyboardNavigationActive, setKeyboardNavigationActive] = useState(false);
   const canMove = props.game.status === "playing" && props.game.currentTurn === props.currentUserId;
   const activePendingMove = pendingMove?.gameId === props.game.id ? pendingMove : null;
   const rowCount = props.game.boardState.length || 15;
@@ -146,6 +147,10 @@ const Board = memo(function Board(props: {
     });
   }, [props.game, props.currentUserId]);
 
+  useEffect(() => {
+    setKeyboardNavigationActive(false);
+  }, [props.game.id, canMove, activePendingMove]);
+
   function clearPendingMove(move: PendingMove): void {
     setPendingMove((current) =>
       current?.gameId === move.gameId && current.row === move.row && current.col === move.col ? null : current
@@ -160,6 +165,7 @@ const Board = memo(function Board(props: {
       return;
     }
 
+    setKeyboardNavigationActive(false);
     setKeyboardCell((current) => (current.row === row && current.col === col ? current : { row, col }));
     const move: PendingMove = {
       gameId: props.game.id,
@@ -205,6 +211,7 @@ const Board = memo(function Board(props: {
     const direction = directions[event.key];
     if (direction) {
       event.preventDefault();
+      setKeyboardNavigationActive(true);
       setKeyboardCell((current) => {
         const row = Math.max(0, Math.min(rowCount - 1, current.row + direction[0]));
         const columnsInRow = props.game.boardState[row]?.length || columnCount;
@@ -240,14 +247,16 @@ const Board = memo(function Board(props: {
   return (
     <div className={`gomoku-board-wrap ${resultKind ?? ""}`}>
       <div
-        className={`gomoku-board ${canMove && !activePendingMove ? "playable" : ""}`}
+        className={`gomoku-board${canMove && !activePendingMove ? " playable" : ""}${keyboardNavigationActive ? " keyboard-navigation-active" : ""}`}
         role="grid"
         aria-label="五子棋棋盘"
         aria-disabled={!canMove || Boolean(activePendingMove)}
         aria-activedescendant={activeCellId}
         tabIndex={canMove && !activePendingMove ? 0 : -1}
+        onPointerDown={() => setKeyboardNavigationActive(false)}
         onClick={handleBoardClick}
         onKeyDown={handleBoardKeyDown}
+        onBlur={() => setKeyboardNavigationActive(false)}
       >
         <span
           className="gomoku-board-grid"
@@ -310,6 +319,9 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
     [games, selectedGameId]
   );
   const canUndoSelectedGame = selectedGame?.undoAvailableTo === currentUser?.id;
+  const canRespondToSelectedInvite = Boolean(
+    selectedGame?.status === "invited" && selectedGame.playerWhite.id === currentUser?.id
+  );
 
   const inviteCandidates = useMemo(() => {
     if (!currentUser) {
@@ -436,31 +448,39 @@ export const GomokuPanel = memo(function GomokuPanel(): JSX.Element | null {
             <>
               <div className="gomoku-game-head">
                 <strong>{`你执${getPlayerColor(selectedGame, currentUser.id)}`}</strong>
-                <div className="gomoku-undo-slot">
-                  <button
-                    type="button"
-                    className={`gomoku-undo-button${canUndoSelectedGame ? "" : " is-placeholder"}`}
-                    disabled={!canUndoSelectedGame || undoingGameId !== null}
-                    aria-hidden={!canUndoSelectedGame}
-                    aria-busy={canUndoSelectedGame && undoingGameId === selectedGame.id}
-                    tabIndex={canUndoSelectedGame ? 0 : -1}
-                    onClick={() => void handleUndo(selectedGame.id)}
-                  >
-                    撤回
-                  </button>
+                <div className="gomoku-game-action-slot">
+                  {canRespondToSelectedInvite ? (
+                    <div className="gomoku-invite-response-actions">
+                      <button
+                        type="button"
+                        className="primary-soft-button gomoku-invite-response-button"
+                        onClick={() => void accept(selectedGame.id)}
+                      >
+                        接受邀请
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button gomoku-invite-response-button"
+                        onClick={() => void reject(selectedGame.id)}
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`gomoku-undo-button${canUndoSelectedGame ? "" : " is-placeholder"}`}
+                      disabled={!canUndoSelectedGame || undoingGameId !== null}
+                      aria-hidden={!canUndoSelectedGame}
+                      aria-busy={canUndoSelectedGame && undoingGameId === selectedGame.id}
+                      tabIndex={canUndoSelectedGame ? 0 : -1}
+                      onClick={() => void handleUndo(selectedGame.id)}
+                    >
+                      撤回
+                    </button>
+                  )}
                 </div>
               </div>
-
-              {selectedGame.status === "invited" && selectedGame.playerWhite.id === currentUser.id ? (
-                <div className="gomoku-invite-response-actions">
-                  <button type="button" className="primary-soft-button" onClick={() => void accept(selectedGame.id)}>
-                    接受邀请
-                  </button>
-                  <button type="button" className="ghost-button" onClick={() => void reject(selectedGame.id)}>
-                    拒绝
-                  </button>
-                </div>
-              ) : null}
 
               <Board
                 game={selectedGame}

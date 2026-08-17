@@ -5,6 +5,8 @@ import {
   type PetDisplayMode,
   type PetReaction
 } from "../utils/pet-animation";
+import { normalizeColorTheme, type ColorTheme } from "../utils/color-theme";
+import { normalizePanelLayout, type PanelLayout } from "../utils/panel-layout";
 
 // ============================================================
 // 常量
@@ -12,6 +14,8 @@ import {
 
 const PET_DISPLAY_MODE_STORAGE_KEY = "xiaoelong_pet_display_mode";
 const PET_ANIMATIONS_STORAGE_KEY = "xiaoelong_pet_animations_enabled";
+const COLOR_THEME_STORAGE_KEY = "xiaoelong_color_theme";
+const PANEL_LAYOUT_STORAGE_KEY = "xiaoelong_panel_layout";
 
 // ============================================================
 // 类型定义
@@ -24,6 +28,8 @@ export type PanelView = "home" | "settings";
 export interface DesktopSettingsState {
   openAtLogin: boolean;
   panelAlwaysOnTop: boolean;
+  colorTheme: ColorTheme;
+  panelLayout: PanelLayout;
   petDisplayMode: PetDisplayMode;
   petAnimationsEnabled: boolean;
   petDisplayModePersisted: boolean;
@@ -129,6 +135,8 @@ export function createInitialState(): DesktopState {
     desktopSettings: {
       openAtLogin: false,
       panelAlwaysOnTop: true,
+      colorTheme: normalizeColorTheme(localStorage.getItem(COLOR_THEME_STORAGE_KEY)),
+      panelLayout: normalizePanelLayout(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY)),
       petDisplayMode: INITIAL_PET_DISPLAY_MODE,
       petAnimationsEnabled: INITIAL_PET_DISPLAY_MODE === "dynamic",
       petDisplayModePersisted: INITIAL_PET_DISPLAY_PREFERENCE.persisted
@@ -208,6 +216,9 @@ export interface DesktopContextValue extends DesktopState {
   setDetailsOpen: (open: boolean) => void;
   toggleLoginAtStartup: () => Promise<void>;
   togglePanelTopmost: () => Promise<void>;
+  setColorTheme: (theme: ColorTheme) => Promise<void>;
+  setPanelLayout: (layout: PanelLayout) => Promise<void>;
+  setPetDisplayMode: (mode: PetDisplayMode) => Promise<void>;
   cyclePetDisplayMode: () => Promise<void>;
   checkForUpdates: () => Promise<void>;
   downloadUpdate: () => Promise<void>;
@@ -225,6 +236,10 @@ const DesktopContext = createContext<DesktopContextValue | null>(null);
 export function DesktopProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(desktopReducer, null, createInitialState);
 
+  useEffect(() => {
+    document.documentElement.dataset.colorTheme = state.desktopSettings.colorTheme;
+  }, [state.desktopSettings.colorTheme]);
+
   // ---- 辅助函数 ----
 
   const applyDesktopSettings = useCallback((settings: DesktopSettingsState): void => {
@@ -234,10 +249,15 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
     );
     const nextSettings = {
       ...settings,
+      colorTheme: normalizeColorTheme(settings.colorTheme),
+      panelLayout: normalizePanelLayout(settings.panelLayout),
       petDisplayMode,
       petAnimationsEnabled: petDisplayMode === "dynamic"
     };
     localStorage.setItem(PET_DISPLAY_MODE_STORAGE_KEY, petDisplayMode);
+    localStorage.setItem(COLOR_THEME_STORAGE_KEY, nextSettings.colorTheme);
+    localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, nextSettings.panelLayout);
+    document.documentElement.dataset.colorTheme = nextSettings.colorTheme;
     localStorage.setItem(
       PET_ANIMATIONS_STORAGE_KEY,
       String(nextSettings.petAnimationsEnabled)
@@ -331,8 +351,37 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.desktopSettings.panelAlwaysOnTop, applyDesktopSettings]);
 
-  const cyclePetDisplayMode = useCallback(async (): Promise<void> => {
-    const nextMode = getNextPetDisplayMode(state.desktopSettings.petDisplayMode);
+  const setColorTheme = useCallback(async (theme: ColorTheme): Promise<void> => {
+    const nextTheme = normalizeColorTheme(theme);
+    localStorage.setItem(COLOR_THEME_STORAGE_KEY, nextTheme);
+    document.documentElement.dataset.colorTheme = nextTheme;
+    dispatch({
+      type: "SET_DESKTOP_SETTINGS",
+      payload: { ...state.desktopSettings, colorTheme: nextTheme }
+    });
+
+    const nextSettings = await window.xiaoelongDesktop?.setColorTheme?.(nextTheme);
+    if (nextSettings) {
+      applyDesktopSettings(nextSettings);
+    }
+  }, [state.desktopSettings, applyDesktopSettings]);
+
+  const setPanelLayout = useCallback(async (layout: PanelLayout): Promise<void> => {
+    const nextLayout = normalizePanelLayout(layout);
+    localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, nextLayout);
+    dispatch({
+      type: "SET_DESKTOP_SETTINGS",
+      payload: { ...state.desktopSettings, panelLayout: nextLayout }
+    });
+
+    const nextSettings = await window.xiaoelongDesktop?.setPanelLayout?.(nextLayout);
+    if (nextSettings) {
+      applyDesktopSettings(nextSettings);
+    }
+  }, [state.desktopSettings, applyDesktopSettings]);
+
+  const setPetDisplayMode = useCallback(async (mode: PetDisplayMode): Promise<void> => {
+    const nextMode = normalizePetDisplayMode(mode);
     localStorage.setItem(PET_DISPLAY_MODE_STORAGE_KEY, nextMode);
     localStorage.setItem(PET_ANIMATIONS_STORAGE_KEY, String(nextMode === "dynamic"));
     dispatch({
@@ -349,6 +398,10 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
       applyDesktopSettings(nextSettings);
     }
   }, [state.desktopSettings, applyDesktopSettings]);
+
+  const cyclePetDisplayMode = useCallback(async (): Promise<void> => {
+    await setPetDisplayMode(getNextPetDisplayMode(state.desktopSettings.petDisplayMode));
+  }, [state.desktopSettings.petDisplayMode, setPetDisplayMode]);
 
   const checkForUpdates = useCallback(async (): Promise<void> => {
     try {
@@ -463,6 +516,9 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
       setDetailsOpen,
       toggleLoginAtStartup,
       togglePanelTopmost,
+      setColorTheme,
+      setPanelLayout,
+      setPetDisplayMode,
       cyclePetDisplayMode,
       checkForUpdates,
       downloadUpdate,
@@ -480,6 +536,9 @@ export function DesktopProvider({ children }: { children: React.ReactNode }) {
       setDetailsOpen,
       toggleLoginAtStartup,
       togglePanelTopmost,
+      setColorTheme,
+      setPanelLayout,
+      setPetDisplayMode,
       cyclePetDisplayMode,
       checkForUpdates,
       downloadUpdate,

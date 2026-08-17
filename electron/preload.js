@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld("xiaoelongDesktop", {
   getSettings: () => ipcRenderer.invoke("desktop:settings:get"),
   setLoginAtStartup: (enabled) => ipcRenderer.invoke("desktop:settings:set-login-at-startup", enabled),
   setPanelAlwaysOnTop: (enabled) => ipcRenderer.invoke("desktop:settings:set-panel-always-on-top", enabled),
+  setColorTheme: (theme) => ipcRenderer.invoke("desktop:settings:set-color-theme", theme),
+  setPanelLayout: (layout) => ipcRenderer.invoke("desktop:settings:set-panel-layout", layout),
   setPetDisplayMode: (mode) => ipcRenderer.invoke("desktop:settings:set-pet-display-mode", mode),
   migratePetDisplayMode: (mode) => ipcRenderer.invoke("desktop:settings:migrate-pet-display-mode", mode),
   setPetAnimationsEnabled: (enabled) => ipcRenderer.invoke("desktop:settings:set-pet-animations-enabled", enabled),

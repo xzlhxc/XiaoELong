@@ -51,6 +51,8 @@ describe("desktopReducer", () => {
       desktopSettings: {
         openAtLogin: false,
         panelAlwaysOnTop: true,
+        colorTheme: "melonStone",
+        panelLayout: "classic",
         petDisplayMode: "dynamic",
         petAnimationsEnabled: true,
         petDisplayModePersisted: true

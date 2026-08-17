@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { UserAvatar } from "../atoms/UserAvatar";
 
@@ -18,6 +18,7 @@ export function SettingsProfileForm(): JSX.Element | null {
   const [nickname, setNickname] = useState(user.nickname);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setNickname(user.nickname);
@@ -52,7 +53,14 @@ export function SettingsProfileForm(): JSX.Element | null {
   return (
     <form className="settings-profile-form" onSubmit={handleSubmit}>
       <div className="settings-profile-main">
-        <div className="settings-profile-preview">
+        <button
+          type="button"
+          className="settings-profile-preview settings-profile-avatar-button"
+          aria-label="更换头像"
+          title="点击更换头像"
+          disabled={loading}
+          onClick={() => avatarInputRef.current?.click()}
+        >
           {avatarPreviewUrl ? (
             <img src={avatarPreviewUrl} alt="" draggable={false} />
           ) : (
@@ -62,7 +70,19 @@ export function SettingsProfileForm(): JSX.Element | null {
               fallbackClassName="settings-profile-avatar settings-profile-avatar-fallback"
             />
           )}
-        </div>
+        </button>
+
+        <input
+          ref={avatarInputRef}
+          className="file-input"
+          type="file"
+          accept="image/*"
+          aria-label="选择新头像文件"
+          onChange={(event) => {
+            setAvatarFile(event.target.files?.[0] ?? null);
+            event.currentTarget.value = "";
+          }}
+        />
 
         <label className="settings-profile-field">
           昵称
@@ -75,19 +95,6 @@ export function SettingsProfileForm(): JSX.Element | null {
           />
         </label>
       </div>
-
-      <label className="settings-avatar-picker">
-        <input
-          className="file-input"
-          type="file"
-          accept="image/*"
-          onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)}
-        />
-        <span className="file-upload-control settings-file-control">
-          <span className="file-upload-button">选择头像</span>
-          <span className="file-upload-name">{avatarFile ? avatarFile.name : "沿用当前头像"}</span>
-        </span>
-      </label>
 
       {error ? <p className="error-text settings-profile-message">{error}</p> : null}
       <button type="submit" className="primary-soft-button settings-profile-save" disabled={loading || !hasChanges}>

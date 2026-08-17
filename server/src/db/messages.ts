@@ -103,11 +103,26 @@ export async function messageExists(messageId: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-export async function getRecentMessages(limit: number): Promise<ChatMessage[]> {
+export interface ChatHistoryPage {
+  messages: ChatMessage[];
+  hasMore: boolean;
+  nextBeforeId: number | null;
+}
+
+export async function getRecentMessages(limit: number, beforeId?: number): Promise<ChatHistoryPage> {
+  const values = beforeId === undefined ? [limit + 1] : [beforeId, limit + 1];
+  const beforeClause = beforeId === undefined ? "" : " WHERE m.id < ?";
   const [rows] = await pool.query<MessageWithUserRow[]>(
-    `${MESSAGE_WITH_USER_SELECT} ORDER BY m.created_at DESC, m.id DESC LIMIT ?`,
-    [limit]
+    `${MESSAGE_WITH_USER_SELECT}${beforeClause} ORDER BY m.id DESC LIMIT ?`,
+    values
   );
 
-  return rows.reverse().map(mapMessageWithUserRow);
+  const hasMore = rows.length > limit;
+  const messages = rows.slice(0, limit).reverse().map(mapMessageWithUserRow);
+
+  return {
+    messages,
+    hasMore,
+    nextBeforeId: hasMore ? messages[0]?.id ?? null : null
+  };
 }

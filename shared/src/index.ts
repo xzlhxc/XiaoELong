@@ -72,6 +72,10 @@ export interface AuthDeleteResponse {
 
 export interface ChatHistoryResponse {
   messages: ChatMessage[];
+  /** Optional so a new client can still consume responses from an older server. */
+  hasMore?: boolean;
+  /** Pass this value as `beforeId` to load the next older page. */
+  nextBeforeId?: number | null;
 }
 
 export interface ChatImageUploadResponse {

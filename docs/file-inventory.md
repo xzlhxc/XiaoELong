@@ -1,6 +1,6 @@
 # XiaoELong 项目文件清单
 
-> 更新日期：2026-08-13 | 版本：2.1.1
+> 更新日期：2026-08-17 | 版本：2.1.2
 
 本文档列出项目所有文件和目录的用途，并标识可删除/优化的文件。
 
@@ -107,6 +107,8 @@ XiaoELong/
 | 文件 | 行数 | 作用 |
 |------|------|------|
 | `client/src/utils/pet-animation.ts` | ~216 | 桌宠动画状态机：动画模式（idle/happy/excited/sleeping 等）、帧序列、`getPetReaction` |
+| `client/src/utils/color-theme.ts` | ~45 | 外观配色选项、主题色板与默认主题归一化 |
+| `client/src/utils/panel-layout.ts` | ~7 | 原始/郭之面板布局类型与持久化值归一化 |
 | `client/src/utils/chat-time.ts` | ~38 | 聊天消息时间格式化：当天显示"HH:mm"，非当天显示完整日期 |
 | `client/src/utils/deity-rank-visuals.ts` | ~39 | 神选段位视觉效果：等级颜色、图标、粒子效果配置 |
 
@@ -119,7 +121,7 @@ XiaoELong/
 | `client/src/contexts/DesktopContext.tsx` | ~505 | 桌面窗口状态：desktopRole、窗口显示、桌宠显示模式 |
 | `client/src/contexts/AuthContext.tsx` | ~860 | 认证：登录/登出、资料更新、自动续签和多窗口会话对账 |
 | `client/src/contexts/DeityContext.tsx` | ~475 | 神选膜拜：列表、段位、膜拜状态及续签时请求失效保护 |
-| `client/src/contexts/ChatContext.tsx` | ~520 | 聊天：消息、引用、附件、Socket 订阅、重连补拉及条件会话失效 |
+| `client/src/contexts/ChatContext.tsx` | ~635 | 聊天：消息、引用、附件、向上分页、Socket 重连补拉及条件会话失效 |
 | `client/src/contexts/GomokuContext.tsx` | ~578 | 五子棋：对局状态、落子/撤回互斥、无闪刷新、Socket 分流及续签时请求失效保护 |
 | `client/src/contexts/DailyContext.tsx` | ~471 | 每日一题 + 每日心情：题目、答题、心情选择、静默轮询与无闪刷新状态 |
 
@@ -133,6 +135,7 @@ XiaoELong/
 | `client/src/components/atoms/EnergyWing.tsx` + `.css` | ~220 + 95 | 能量翅膀装饰动画组件 |
 | `client/src/components/atoms/UserAvatar.tsx` | ~49 | 用户头像组件 |
 | `client/src/components/atoms/RefreshStatus.tsx` | ~90 | 通用刷新反馈：防重复触发并保证“刷新中”至少稳定显示 650ms |
+| `client/src/components/atoms/ModuleTabIcon.tsx` | ~60 | 郭之布局左侧导航的聊天、每日、神选和五子棋图标 |
 
 #### pages/ — 页面组件（按 desktopRole 分发）
 
@@ -140,7 +143,7 @@ XiaoELong/
 |------|------|------|
 | `client/src/components/pages/AuthPage.tsx` | ~32 | 登录页（未登录角色） |
 | `client/src/components/pages/PanelPage.tsx` | ~37 | 主面板页 |
-| `client/src/components/pages/PanelContent.tsx` | ~246 | 主面板内容：tab 切换 + 各 panel 组装 |
+| `client/src/components/pages/PanelContent.tsx` | ~460 | 主面板内容：tab 切换、原始/郭之布局、外观配色/布局/形象设置与各 panel 组装 |
 | `client/src/components/pages/AvatarPage.tsx` | ~20 | 悬浮桌宠页 |
 | `client/src/components/pages/SinglePage.tsx` | ~15 | 单窗口页 |
 | `client/src/components/pages/DivinePage.tsx` | ~13 | 全屏神选页 |
@@ -150,13 +153,13 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `client/src/components/panels/ChatPanel.tsx` | ~1085 | 聊天面板：消息列表、文字输入、图片/文件上传、右键引用、补拉消息的未读与滚动锚点、滚动到底 |
+| `client/src/components/panels/ChatPanel.tsx` | ~1150 | 聊天面板：消息列表、滚顶加载更早记录、文字输入、图片/文件上传、右键引用、未读与滚动锚点 |
 | `client/src/components/panels/DivineSelectionPanel.tsx` | ~461 | 神选膜拜面板：七位神明卡片、段位展示、膜拜按钮 |
 | `client/src/components/panels/GomokuPanel.tsx` | ~452 | 五子棋面板：对局列表、棋盘渲染、落子/撤回交互、邀请选择及刷新状态 |
 | `client/src/components/panels/DailyQuestionPanel.tsx` | ~389 | 每日一题面板：题目展示（含可视化附图）、四选一、统计柱状图、答案揭晓及保留内容的刷新状态 |
 | `client/src/components/panels/AvatarDock.tsx` | ~363 | 悬浮桌宠容器：拖拽入口、形象展示、面板开关、心情快捷选择 |
 | `client/src/components/panels/StatusBar.tsx` | ~192 | 在线状态栏：在线用户列表 + 每日心情选择器 |
-| `client/src/components/panels/SettingsProfileForm.tsx` | ~98 | 设置/个人资料表单：昵称、头像、注销、桌宠设置 |
+| `client/src/components/panels/SettingsProfileForm.tsx` | ~110 | 设置/个人资料表单：昵称、可点击更换的头像与账户注销 |
 | `client/src/components/panels/JoinForm.tsx` | ~70 | 加入表单：邀请码输入、昵称、头像上传预览 |
 
 ### 样式（styles/）
@@ -211,7 +214,7 @@ XiaoELong/
 | 文件 | 行数 | 作用 |
 |------|------|------|
 | `server/src/routes/auth.ts` | ~246 | 认证路由：POST /join、GET /me（获取用户并按需续签）、PUT /me、DELETE /me |
-| `server/src/routes/chat.ts` | ~149 | 聊天路由：GET /messages（历史消息）、POST /images（上传图片）、POST /files（上传文件） |
+| `server/src/routes/chat.ts` | ~155 | 聊天路由：GET /messages（基于 beforeId 的历史分页）、POST /images（上传图片）、POST /files（上传文件） |
 | `server/src/routes/daily-question.ts` | ~80 | 每日一题路由：GET /today（今日题目+统计）、POST /answer（提交答案）、GET /stats（题目统计） |
 | `server/src/routes/daily-mood.ts` | ~50 | 每日心情路由：GET /today（今日心情）、POST /（设置心情） |
 | `server/src/routes/deity-worship.ts` | ~60 | 神选膜拜路由：GET /today（今日膜拜状态）、POST /（提交膜拜） |
@@ -242,7 +245,7 @@ XiaoELong/
 | `server/src/db/init.ts` | ~40 | 数据库初始化脚本：读取 init.sql、连接数据库、执行 SQL |
 | `server/src/db/init.sql` | ~302 | **数据库 DDL + 渐进式迁移**：创建 7 张表并通过条件式 ALTER 幂等补列；V2.1.1 新增 `gomoku_games.last_undone_move_no` |
 | `server/src/db/users.ts` | ~100 | 用户 CRUD：创建（UUID v4）、按 ID 查询、按昵称查询、更新资料、删除（级联） |
-| `server/src/db/messages.ts` | ~60 | 消息存取：插入消息（含图片/文件元数据）、查询最近 N 条历史 |
+| `server/src/db/messages.ts` | ~130 | 消息存取：插入消息（含图片/文件元数据）、按消息 ID 游标分页查询历史 |
 | `server/src/db/daily-questions.ts` | ~80 | 每日一题存取：按日期查询题目、插入题目、查询答案、插入答案、统计 |
 | `server/src/db/daily-moods.ts` | ~50 | 每日心情存取：按日期查询、插入/更新心情 |
 | `server/src/db/deity-worships.ts` | ~60 | 神选膜拜存取：按日期查询膜拜记录、插入膜拜、统计各神祇膜拜数 |

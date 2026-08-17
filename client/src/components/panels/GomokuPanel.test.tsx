@@ -106,7 +106,7 @@ describe("GomokuPanel 正常路径", () => {
 
     expect(screen.getByText("轮到小黑行棋")).toBeTruthy();
     const gameHead = container.querySelector(".gomoku-game-head");
-    expect(gameHead?.textContent).toBe("你执黑");
+    expect(gameHead?.querySelector("strong")?.textContent).toBe("你执黑");
     expect(gameHead?.textContent).not.toContain("对手：");
     expect(gameHead?.textContent).not.toContain("轮到");
     expect(screen.getByRole("grid")).toBeTruthy();
@@ -132,7 +132,13 @@ describe("GomokuPanel 正常路径", () => {
       invitedBy: "u2"
     });
     mockGomoku({ games: [game], selectedGameId: game.id });
-    render(<GomokuPanel />);
+    const { container } = render(<GomokuPanel />);
+
+    const gameHead = container.querySelector(".gomoku-game-head");
+    expect(gameHead?.querySelector("strong")?.textContent).toBe("你执白");
+    expect(gameHead?.querySelector(".gomoku-invite-response-actions")).toBeTruthy();
+    expect(container.querySelector(".gomoku-right > .gomoku-invite-response-actions")).toBeNull();
+    expect(gameHead?.nextElementSibling?.classList.contains("gomoku-board-wrap")).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "接受邀请" }));
     expect(accept).toHaveBeenCalledWith(3);
@@ -187,6 +193,28 @@ describe("GomokuPanel 正常路径", () => {
     fireEvent.click(screen.getByRole("button", { name: "撤回" }));
     await waitFor(() => expect(undo).toHaveBeenCalledWith(7));
   });
+
+  it("单独按 Shift 不显示棋盘定位框，方向键导航时才显示", () => {
+    const game = makeGame({ status: "playing", currentTurn: "u1" });
+    mockGomoku({ games: [game], selectedGameId: game.id });
+    render(<GomokuPanel />);
+
+    const board = screen.getByRole("grid");
+    fireEvent.focus(board);
+    fireEvent.keyDown(board, { key: "Shift" });
+    expect(board.classList.contains("keyboard-navigation-active")).toBe(false);
+
+    fireEvent.keyDown(board, { key: "ArrowRight" });
+    expect(board.classList.contains("keyboard-navigation-active")).toBe(true);
+
+    fireEvent.pointerDown(board);
+    fireEvent.keyDown(board, { key: "Shift" });
+    expect(board.classList.contains("keyboard-navigation-active")).toBe(false);
+
+    fireEvent.keyDown(board, { key: "ArrowLeft" });
+    fireEvent.blur(board);
+    expect(board.classList.contains("keyboard-navigation-active")).toBe(false);
+  });
 });
 
 // ============================================================
@@ -228,7 +256,7 @@ describe("GomokuPanel 边界条件", () => {
     render(<GomokuPanel />);
 
     expect(screen.queryByRole("button", { name: "撤回" })).toBeNull();
-    const placeholder = document.querySelector(".gomoku-undo-slot > .gomoku-undo-button.is-placeholder") as HTMLButtonElement;
+    const placeholder = document.querySelector(".gomoku-game-action-slot > .gomoku-undo-button.is-placeholder") as HTMLButtonElement;
     expect(placeholder).toBeTruthy();
     expect(placeholder.disabled).toBe(true);
     expect(placeholder.tabIndex).toBe(-1);

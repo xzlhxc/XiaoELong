@@ -1,6 +1,6 @@
 # XiaoELong 项目架构文档
 
-> 版本：2.1.1 | 更新日期：2026-08-13
+> 版本：2.1.2 | 更新日期：2026-08-17
 
 ---
 
@@ -241,7 +241,7 @@ Electron Main Process (main.js)
 - **6 个 Context**（`contexts/`，各持 `useReducer` + `useContext`，配套 Socket 订阅/分流）：
   - `DesktopContext`：桌面窗口状态、桌宠显示
   - `AuthContext`：认证、用户资料
-  - `ChatContext`：聊天消息、上传、Socket 订阅，以及重连/网络恢复后的会话隔离补拉
+  - `ChatContext`：聊天消息、上传、基于消息 ID 的向上分页、Socket 订阅，以及重连/网络恢复后的会话隔离补拉
   - `DailyContext`：每日一题、每日心情，以及保留当前内容的刷新状态
   - `DeityContext`：神选膜拜
   - `GomokuContext`：五子棋对局、落子/撤回互斥、无闪刷新与 Socket 事件分流
@@ -491,7 +491,7 @@ POST /api/daily-question/answer { questionId, answerIndex }
 | GET | `/api/auth/me` | JWT | 获取当前用户，并按需返回续签后的 `accessToken` |
 | PUT | `/api/auth/me` | JWT | 更新昵称/头像 |
 | DELETE | `/api/auth/me` | JWT | 注销账户 |
-| GET | `/api/chat/messages?limit=50` | JWT | 获取历史消息 |
+| GET | `/api/chat/messages?limit=50&beforeId=<id>` | JWT | 获取历史消息；`beforeId` 可选，用于向前分页 |
 | POST | `/api/chat/images` | JWT | 上传聊天图片 |
 | POST | `/api/chat/files` | JWT | 上传聊天文件 |
 | GET | `/api/daily-question/today` | JWT | 获取今日题目 |

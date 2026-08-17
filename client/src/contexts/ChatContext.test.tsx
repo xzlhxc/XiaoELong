@@ -224,6 +224,9 @@ describe("createInitialState", () => {
     expect(state.sendError).toBeNull();
     expect(state.socketError).toBeNull();
     expect(state.historyInitialized).toBe(false);
+    expect(state.hasOlderMessages).toBe(true);
+    expect(state.loadingOlderMessages).toBe(false);
+    expect(state.olderMessagesError).toBeNull();
   });
 });
 
@@ -600,12 +603,59 @@ describe("聊天历史加载", () => {
   });
 
   it("加载成功 → messages 被填充", async () => {
-    apiMock.getRecentMessages.mockResolvedValue({ messages: [makeMessage(1)] });
+    apiMock.getRecentMessages.mockResolvedValue({ messages: [makeMessage(1)], hasMore: true, nextBeforeId: 1 });
     const { result } = await renderChat();
 
     await act(async () => {});
     expect(result.current.messages).toEqual([makeMessage(1)]);
     expect(result.current.historyInitialized).toBe(true);
+    expect(result.current.hasOlderMessages).toBe(true);
+  });
+
+  it("向上分页用最早消息 id 加载并合并更早记录", async () => {
+    apiMock.getRecentMessages
+      .mockResolvedValueOnce({ messages: [makeMessage(51), makeMessage(52)], hasMore: true, nextBeforeId: 51 })
+      .mockResolvedValueOnce({ messages: [makeMessage(49), makeMessage(50)], hasMore: false, nextBeforeId: null });
+    const { result } = await renderChat();
+
+    await act(async () => {
+      await result.current.loadOlderMessages();
+    });
+
+    expect(apiMock.getRecentMessages).toHaveBeenLastCalledWith("t1", 50, 51);
+    expect(result.current.messages.map((message) => message.id)).toEqual([49, 50, 51, 52]);
+    expect(result.current.hasOlderMessages).toBe(false);
+    expect(result.current.loadingOlderMessages).toBe(false);
+  });
+
+  it("旧服务端忽略 beforeId 且没有更早 id 时停止继续分页", async () => {
+    const recentPage = Array.from({ length: 50 }, (_, index) => makeMessage(index + 51));
+    apiMock.getRecentMessages
+      .mockResolvedValueOnce({ messages: recentPage })
+      .mockResolvedValueOnce({ messages: recentPage });
+    const { result } = await renderChat();
+
+    await act(async () => {
+      await result.current.loadOlderMessages();
+    });
+
+    expect(result.current.hasOlderMessages).toBe(false);
+    expect(result.current.messages.map((message) => message.id)).toEqual(recentPage.map((message) => message.id));
+  });
+
+  it("更早记录加载失败会保留重试资格和现有消息", async () => {
+    apiMock.getRecentMessages
+      .mockResolvedValueOnce({ messages: [makeMessage(51)], hasMore: true, nextBeforeId: 51 })
+      .mockRejectedValueOnce(new Error("network down"));
+    const { result } = await renderChat();
+
+    await act(async () => {
+      await result.current.loadOlderMessages();
+    });
+
+    expect(result.current.messages).toEqual([makeMessage(51)]);
+    expect(result.current.hasOlderMessages).toBe(true);
+    expect(result.current.olderMessagesError).toBe("更早的消息暂时未加载，请稍后重试。");
   });
 });
 

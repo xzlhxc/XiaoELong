@@ -86,8 +86,17 @@ export async function updateCurrentProfile(token: string, formData: FormData): P
   });
 }
 
-export async function getRecentMessages(token: string, limit = 50): Promise<ChatHistoryResponse> {
-  return requestJson<ChatHistoryResponse>(`/api/chat/messages?limit=${limit}`, {
+export async function getRecentMessages(
+  token: string,
+  limit = 50,
+  beforeId?: number
+): Promise<ChatHistoryResponse> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (beforeId !== undefined) {
+    query.set("beforeId", String(beforeId));
+  }
+
+  return requestJson<ChatHistoryResponse>(`/api/chat/messages?${query.toString()}`, {
     token
   });
 }

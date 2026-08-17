@@ -91,23 +91,29 @@ const chatFileUpload = multer({
   }
 });
 
+const queryValueSchema = z.union([z.string(), z.number()]);
+
 const querySchema = z.object({
-  limit: z.coerce.number().int().positive().max(100).default(50)
+  limit: queryValueSchema.pipe(z.coerce.number().int().positive().max(100)).default(50),
+  beforeId: queryValueSchema
+    .pipe(z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER))
+    .optional()
 });
 
 router.get("/messages", requireAuth, async (req, res, next) => {
   const parsed = querySchema.safeParse({
-    limit: req.query.limit ?? 50
+    limit: req.query.limit ?? 50,
+    beforeId: req.query.beforeId
   });
 
   if (!parsed.success) {
-    res.status(400).json({ message: "Invalid limit query." });
+    res.status(400).json({ message: "Invalid chat history query." });
     return;
   }
 
   try {
-    const messages = await getRecentMessages(parsed.data.limit);
-    res.json({ messages });
+    const history = await getRecentMessages(parsed.data.limit, parsed.data.beforeId);
+    res.json(history);
   } catch (error) {
     next(error);
   }

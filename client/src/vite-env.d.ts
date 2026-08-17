@@ -29,6 +29,13 @@ interface XiaoELongUpdateState {
 interface XiaoELongDesktopSettings {
   openAtLogin: boolean;
   panelAlwaysOnTop: boolean;
+  colorTheme:
+    | "melonStone"
+    | "lemonMist"
+    | "peachIndigo"
+    | "orangePurple"
+    | "creamGray";
+  panelLayout: "classic" | "guo";
   petDisplayMode: "dynamic" | "static" | "image";
   petAnimationsEnabled: boolean;
   petDisplayModePersisted: boolean;
@@ -91,6 +98,17 @@ interface Window {
     readonly getSettings?: () => Promise<XiaoELongDesktopSettings>;
     readonly setLoginAtStartup?: (enabled: boolean) => Promise<XiaoELongDesktopSettings>;
     readonly setPanelAlwaysOnTop?: (enabled: boolean) => Promise<XiaoELongDesktopSettings>;
+    readonly setColorTheme?: (
+      theme:
+        | "melonStone"
+        | "lemonMist"
+        | "peachIndigo"
+        | "orangePurple"
+        | "creamGray"
+    ) => Promise<XiaoELongDesktopSettings>;
+    readonly setPanelLayout?: (
+      layout: "classic" | "guo"
+    ) => Promise<XiaoELongDesktopSettings>;
     readonly setPetDisplayMode?: (
       mode: "dynamic" | "static" | "image"
     ) => Promise<XiaoELongDesktopSettings>;

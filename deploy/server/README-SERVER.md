@@ -1,8 +1,15 @@
 # 小鳄龙服务器部署与更新说明
 
-当前版本：`2.1.1`
+当前版本：`2.1.2`
 
 本目录是小鳄龙 Windows 服务器部署包，适用于宝塔 Windows 面板和 MySQL 5.6。部署包已将需要使用的 MySQL `JSON` 字段改为 `TEXT`，以兼容 MySQL 5.6。
+
+## 2.1.2 更新说明
+
+- 聊天历史接口新增基于消息 ID 的 `beforeId` 游标分页；客户端启动仍加载最近 50 条，滚动到顶部后可继续查询全部更早记录。
+- 分页结果保持升序并返回 `hasMore` 与 `nextBeforeId`；旧客户端仍可继续使用新版服务端。
+- 本版本没有新增依赖或数据库结构变更。从 `2.1.1` 升级可以跳过 `npm install` 和 `db:init`，覆盖新版程序并重启服务端即可。
+- 为使新版客户端能够查看 50 条以前的聊天记录，建议先部署并重启本版服务端，再发布桌面客户端。
 
 ## 2.1.1 更新说明
 
@@ -81,7 +88,7 @@ npm.cmd run server:deploy
 命令会先只清理 `server/dist` 和 `shared/dist`，重新构建后生成：
 
 ```text
-deploy\XiaoELong-server-2.1.1.zip
+deploy\XiaoELong-server-2.1.2.zip
 ```
 
 Windows 使用系统自带的 PowerShell/.NET 完成压缩，不需要安装额外的 `zip` 工具；macOS/Linux 需要系统提供 `zip` 命令。脚本先生成同目录临时 ZIP，成功后才替换正式 ZIP，失败时保留上一份正式包。常规 `npm run clean` 不会删除 `deploy` 下已有的部署 ZIP。
@@ -298,7 +305,7 @@ $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 ```
 
 ```powershell
-Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.1.1 server" -Force
+Register-ScheduledTask -TaskName "XiaoELongServer" -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Description "XiaoELong 2.1.2 server" -Force
 ```
 
 启动计划任务：
@@ -338,7 +345,7 @@ Start-ScheduledTask -TaskName "XiaoELongServer"
 
 服务器程序更新和桌面客户端自动更新是两件不同的事。本节用于更新后端程序。
 
-从 `2.1.0` 升级到 `2.1.1` 时没有依赖变化，可跳过本节第 4 步；数据库新增了五子棋撤回字段，第 5 步不能跳过。覆盖程序后必须先执行 `db:init`，确认成功再启动新版服务端，最后才发布桌面客户端。从更早版本升级或无法确认当前环境时，按完整流程执行。
+从 `2.1.1` 升级到 `2.1.2` 时没有依赖和数据库结构变化，可跳过本节第 4、5 步；覆盖程序后直接启动并验证新版服务端，再发布桌面客户端。从 `2.1.0` 或更早版本升级、依赖状态无法确认，或此前没有执行过五子棋撤回字段迁移时，按完整流程执行。
 
 ### 1. 更新前备份
 
@@ -381,7 +388,7 @@ C:\wwwroot\server\updates
 
 ### 4. 重新安装依赖
 
-从 `2.1.0` 升级到 `2.1.1` 可以跳过本步骤；从更早版本升级或依赖状态无法确认时再执行。
+从 `2.1.1` 升级到 `2.1.2` 可以跳过本步骤；从更早版本升级或依赖状态无法确认时再执行。
 
 ```powershell
 Set-Location "C:\wwwroot\server"
@@ -390,7 +397,7 @@ Set-Location "C:\wwwroot\server"
 
 ### 5. 更新数据库结构
 
-从 `2.1.0` 升级到 `2.1.1` 必须执行本步骤。脚本会幂等添加 `gomoku_games.last_undone_move_no`，已有对局和落子记录会保留；重复执行不会重复添加字段。
+从已经完整部署的 `2.1.1` 升级到 `2.1.2` 可以跳过本步骤。若从 `2.1.0` 或更早版本升级，或无法确认五子棋撤回迁移是否执行过，则必须运行；脚本会幂等添加 `gomoku_games.last_undone_move_no`，已有对局和落子记录会保留，重复执行不会重复添加字段。
 
 ```powershell
 Set-Location "C:\wwwroot\server\server"
@@ -496,7 +503,7 @@ XiaoELong Setup x.y.z.exe
 
 `latest.yml` 和 `blockmap` 只供自动更新服务使用，不需要发送给普通用户。客户端只会更新到比当前版本更高的版本，因此不能用同一个版本号验证自动更新。
 
-### 2. macOS 2.1.1 检查更新并下载 DMG
+### 2. macOS 2.1.2 检查更新并下载 DMG
 
 Mac 版从 `1.3.2` 开始读取服务器上的：
 
@@ -506,11 +513,11 @@ C:\wwwroot\server\updates\latest-mac.json
 
 发布顺序如下：
 
-1. 在 GitHub 创建标签为 `v2.1.1` 的 Release，并上传 Actions 产物中的 `XiaoELong-2.1.1-mac-universal.dmg`。
+1. 在 GitHub 创建标签为 `v2.1.2` 的 Release，并上传 Actions 产物中的 `XiaoELong-2.1.2-mac-universal.dmg`。
 2. 在浏览器中确认下面的 GitHub HTTPS 地址能开始下载，并核对 DMG 的大小与 `SHA256-mac.txt`：
 
 ```text
-https://github.com/sheephjc/XiaoELong/releases/download/v2.1.1/XiaoELong-2.1.1-mac-universal.dmg
+https://github.com/sheephjc/XiaoELong/releases/download/v2.1.2/XiaoELong-2.1.2-mac-universal.dmg
 ```
 
 3. 最后把同一次 Actions 产物中的 `latest-mac.json` 上传到服务器的 `updates` 目录，覆盖旧清单。
@@ -522,7 +529,7 @@ http://43.139.223.204:3001/updates/latest-mac.json
 
 Mac 客户端只从清单读取版本和发布校验信息，实际打开的下载地址由客户端固定构造为本项目的 GitHub Release HTTPS 地址，清单不能将用户重定向到其他站点。`latest-mac.yml` 和 Mac ZIP 不需要上传到服务器。
 
-静态清单替换后通常不需要重启后端。已经安装 `1.3.2` 或更高版本的用户会看到 `2.1.1` 更新提示；`1.3.1` 没有这段逻辑，需要直接发送 `2.1.1` DMG。
+静态清单替换后通常不需要重启后端。已经安装 `1.3.2` 或更高版本的用户会看到 `2.1.2` 更新提示；`1.3.1` 没有这段逻辑，需要直接发送 `2.1.2` DMG。
 
 Mac 用户下载后需要完全退出旧版 XiaoELong，打开 DMG，把应用拖入“应用程序”并选择替换。未签名测试版首次打开时，可能还需在 Finder 中右键选择“打开”，或在“系统设置 → 隐私与安全性”中允许运行。若用户无法访问 GitHub，可以直接把 DMG 文件发给他。
 

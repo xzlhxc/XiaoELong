@@ -78,16 +78,25 @@ describe("SettingsProfileForm 正常路径", () => {
     render(<SettingsProfileForm />);
 
     const file = new File(["data"], "avatar.png", { type: "image/png" });
-    const fileInput = document.querySelector("input[type=file]") as HTMLInputElement;
+    const fileInput = screen.getByLabelText("选择新头像文件") as HTMLInputElement;
     fireEvent.change(fileInput, { target: { files: [file] } });
 
-    // 文件选择后显示文件名 + 生成预览（img src 为 mock 的 blob URL）
-    expect(screen.getByText("avatar.png")).toBeTruthy();
+    // 文件选择后直接更新头像预览（img src 为 mock 的 blob URL）
     expect(document.querySelector("img")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "保存资料" }));
     await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
     expect(updateProfile).toHaveBeenCalledWith({ nickname: "小明", avatarFile: file });
+  });
+
+  it("点击头像会打开隐藏的文件选择器", () => {
+    render(<SettingsProfileForm />);
+    const fileInput = screen.getByLabelText("选择新头像文件") as HTMLInputElement;
+    const clickSpy = vi.spyOn(fileInput, "click");
+
+    fireEvent.click(screen.getByRole("button", { name: "更换头像" }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("选择头像")).toBeNull();
   });
 });
 

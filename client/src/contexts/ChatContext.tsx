@@ -27,6 +27,9 @@ export interface ChatState {
   sendError: string | null;
   socketError: string | null;
   historyInitialized: boolean;
+  hasOlderMessages: boolean;
+  loadingOlderMessages: boolean;
+  olderMessagesError: string | null;
 }
 
 export interface SendMessagePayload {
@@ -55,6 +58,8 @@ export type ChatAction =
   | { type: "START_HISTORY" }
   | { type: "SET_MESSAGES"; payload: ChatMessage[] }
   | { type: "SET_HISTORY_INITIALIZED"; payload: boolean }
+  | { type: "START_OLDER_MESSAGES" }
+  | { type: "FINISH_OLDER_MESSAGES"; payload: { hasMore: boolean; error: string | null } }
   | { type: "MERGE_MESSAGES"; payload: ChatMessage[] }
   | { type: "ADD_MESSAGE"; payload: ChatMessage }
   | { type: "SET_PRESENCE_USERS"; payload: PresenceUser[] }
@@ -162,7 +167,10 @@ export function createInitialState(): ChatState {
     presenceUsers: [],
     sendError: null,
     socketError: null,
-    historyInitialized: false
+    historyInitialized: false,
+    hasOlderMessages: true,
+    loadingOlderMessages: false,
+    olderMessagesError: null
   };
 }
 
@@ -173,7 +181,12 @@ export function createInitialState(): ChatState {
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "START_HISTORY":
-      return { ...state, historyInitialized: false };
+      return {
+        ...state,
+        historyInitialized: false,
+        loadingOlderMessages: false,
+        olderMessagesError: null
+      };
 
     case "SET_MESSAGES":
       return {
@@ -185,6 +198,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_HISTORY_INITIALIZED":
       return { ...state, historyInitialized: action.payload };
+
+    case "START_OLDER_MESSAGES":
+      return { ...state, loadingOlderMessages: true, olderMessagesError: null };
+
+    case "FINISH_OLDER_MESSAGES":
+      return {
+        ...state,
+        hasOlderMessages: action.payload.hasMore,
+        loadingOlderMessages: false,
+        olderMessagesError: action.payload.error
+      };
 
     case "MERGE_MESSAGES":
       return { ...state, messages: mergeMessages(state.messages, action.payload) };
@@ -233,6 +257,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
 export interface ChatContextValue extends ChatState {
   sendMessage: (payload: SendMessagePayload) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
   updateMoodForUser: (userId: string, mood: DailyMood) => void;
   clear: () => void;
   scrollMemoryRef: MutableRefObject<ChatScrollMemory | null>;
@@ -249,11 +274,18 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   // ChatPanel 的滚动记忆 ref：Provider 常驻，切 tab 卸载后仍保留，跨挂载恢复滚动位置
   const scrollMemoryRef = useRef<ChatScrollMemory | null>(null);
+  const messagesRef = useRef(state.messages);
+  messagesRef.current = state.messages;
+  const historySessionVersionRef = useRef(0);
+  const olderHistoryInFlightRef = useRef(false);
+  const historyUserIdRef = useRef<string | null>(null);
 
   const { token, currentUserId, currentUser, invalidateSession } = useAuth();
   const { desktopRole } = useDesktop();
 
   const clear = useCallback((): void => {
+    historySessionVersionRef.current += 1;
+    olderHistoryInFlightRef.current = false;
     scrollMemoryRef.current = null;
     dispatch({ type: "CLEAR" });
   }, []);
@@ -269,7 +301,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const accountChanged = historyUserIdRef.current !== null && historyUserIdRef.current !== currentUserId;
+    historyUserIdRef.current = currentUserId;
+    const hadMessagesBeforeLoad = messagesRef.current.length > 0;
+    historySessionVersionRef.current += 1;
+    olderHistoryInFlightRef.current = false;
     let canceled = false;
+    if (accountChanged) {
+      scrollMemoryRef.current = null;
+      dispatch({ type: "CLEAR" });
+    }
     dispatch({ type: "START_HISTORY" });
 
     async function loadChatHistory(): Promise<void> {
@@ -279,6 +320,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         dispatch({ type: "SET_MESSAGES", payload: history.messages });
+        if (accountChanged || !hadMessagesBeforeLoad) {
+          dispatch({
+            type: "FINISH_OLDER_MESSAGES",
+            payload: {
+              hasMore: history.hasMore ?? history.messages.length >= 50,
+              error: null
+            }
+          });
+        }
       } catch (error) {
         if (canceled) {
           return;
@@ -297,6 +347,53 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       canceled = true;
     };
   }, [token, currentUserId, invalidateSession]);
+
+  const loadOlderMessages = useCallback(async (): Promise<void> => {
+    if (!token || !currentUserId || olderHistoryInFlightRef.current || !state.hasOlderMessages) {
+      return;
+    }
+
+    const oldestMessageId = messagesRef.current[0]?.id;
+    if (!oldestMessageId) {
+      return;
+    }
+
+    const requestVersion = historySessionVersionRef.current;
+    olderHistoryInFlightRef.current = true;
+    dispatch({ type: "START_OLDER_MESSAGES" });
+    try {
+      const history = await getRecentMessages(token, 50, oldestMessageId);
+      if (requestVersion !== historySessionVersionRef.current) {
+        return;
+      }
+
+      const olderMessages = history.messages.filter((message) => message.id < oldestMessageId);
+      if (olderMessages.length > 0) {
+        dispatch({ type: "MERGE_MESSAGES", payload: olderMessages });
+      }
+
+      // 旧服务端会忽略 beforeId。若没有任何更早 id，必须终止分页，避免在顶部反复请求同一页。
+      const hasMore = olderMessages.length > 0
+        && (history.hasMore ?? olderMessages.length >= 50);
+      dispatch({ type: "FINISH_OLDER_MESSAGES", payload: { hasMore, error: null } });
+    } catch (error) {
+      if (requestVersion !== historySessionVersionRef.current) {
+        return;
+      }
+      if (isUnauthorizedError(error)) {
+        await invalidateSession(token);
+        return;
+      }
+      dispatch({
+        type: "FINISH_OLDER_MESSAGES",
+        payload: { hasMore: true, error: "更早的消息暂时未加载，请稍后重试。" }
+      });
+    } finally {
+      if (requestVersion === historySessionVersionRef.current) {
+        olderHistoryInFlightRef.current = false;
+      }
+    }
+  }, [token, currentUserId, state.hasOlderMessages, invalidateSession]);
 
   // ---- 当前用户资料变更同步到聊天与成员列表 ----
 
@@ -428,6 +525,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!token || !currentUserId) {
+      historyUserIdRef.current = null;
       clear();
     }
   }, [token, currentUserId, clear]);
@@ -512,11 +610,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       sendMessage,
+      loadOlderMessages,
       updateMoodForUser,
       clear,
       scrollMemoryRef
     }),
-    [state, sendMessage, updateMoodForUser, clear, scrollMemoryRef]
+    [state, sendMessage, loadOlderMessages, updateMoodForUser, clear, scrollMemoryRef]
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
