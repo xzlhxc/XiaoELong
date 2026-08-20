@@ -240,7 +240,7 @@ npm.cmd run electron:dist
 npm run electron:dist:mac
 ```
 
-该命令会在 `release/` 下生成 `XiaoELong-2.2.0-mac-universal.dmg`、`XiaoELong-2.2.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.2.0-mac-universal` 的 Actions 产物。
+该命令会在 `release/` 下生成 `XiaoELong-2.2.0-mac-universal.dmg`、`XiaoELong-2.2.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.2.0-mac-universal` 的 Actions 产物。触发时可选填与版本一致的 `release_tag`（例如 `v2.2.0`），让运行器把验证后的 DMG、`latest-mac.json`、架构和 SHA-256 清单直接追加到已有 GitHub Release。
 
 下载并解压 Actions 产物后，可在 macOS 终端校验安装包：
 
