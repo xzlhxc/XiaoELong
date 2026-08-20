@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import { type PetDisplayMode } from "../../utils/pet-animation";
 import { COLOR_THEME_OPTIONS } from "../../utils/color-theme";
+import { getReleaseAnnouncement, RELEASE_ANNOUNCEMENTS } from "../../data/release-announcements";
 import mascotHitMaskImage from "../../assets/xiaoelong-mascot-hitmask.png";
 import mascotImage from "../../assets/xiaoelong-mascot.png";
 import { useAuth } from "../../contexts/AuthContext";
@@ -16,6 +17,26 @@ import { DivineSelectionPanel } from "../panels/DivineSelectionPanel";
 import { GomokuPanel } from "../panels/GomokuPanel";
 import { SettingsProfileForm } from "../panels/SettingsProfileForm";
 import { StatusBar } from "../panels/StatusBar";
+import { ReleaseAnnouncementDialog } from "../panels/ReleaseAnnouncementDialog";
+
+const CURRENT_APP_VERSION = clientPackage.version;
+const RELEASE_ANNOUNCEMENT_SEEN_STORAGE_KEY = "xiaoelong_release_announcement_seen_version";
+
+function shouldShowCurrentReleaseAnnouncement(): boolean {
+  try {
+    return localStorage.getItem(RELEASE_ANNOUNCEMENT_SEEN_STORAGE_KEY) !== CURRENT_APP_VERSION;
+  } catch {
+    return true;
+  }
+}
+
+function rememberCurrentReleaseAnnouncement(): void {
+  try {
+    localStorage.setItem(RELEASE_ANNOUNCEMENT_SEEN_STORAGE_KEY, CURRENT_APP_VERSION);
+  } catch {
+    // 存储不可用时只影响“仅展示一次”，不阻止关闭公告。
+  }
+}
 
 const PET_DISPLAY_MODE_LABELS: Record<PetDisplayMode, string> = {
   dynamic: "动态交互",
@@ -57,6 +78,8 @@ export function PanelContent(): JSX.Element | null {
   const { selectDivineTab } = useDeity();
   const { currentUser, accountDeleting, deleteAccount } = useAuth();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false);
+  const [currentReleaseOpen, setCurrentReleaseOpen] = useState(shouldShowCurrentReleaseAnnouncement);
   const [appearanceSection, setAppearanceSection] = useState<AppearanceSection>("colors");
 
   // 设置面板顶部栏滚动时才显示滚动条，滚动停止 500ms 后隐藏
@@ -101,6 +124,7 @@ export function PanelContent(): JSX.Element | null {
   useEffect(() => {
     if (panelView !== "settings" || !currentUser) {
       setAppearanceOpen(false);
+      setReleaseHistoryOpen(false);
     }
   }, [panelView, currentUser]);
 
@@ -112,7 +136,7 @@ export function PanelContent(): JSX.Element | null {
   const updateAvailable = updateState.status === "available";
   const updateDownloaded = updateState.status === "downloaded";
   const showUpdateStatus = updateState.message.length > 0 || updateState.progress !== null;
-  const appVersion = clientPackage.version;
+  const appVersion = CURRENT_APP_VERSION;
 
   const selectModuleTab = (tab: ModuleTab): void => {
     if (tab === "divine") {
@@ -165,7 +189,7 @@ export function PanelContent(): JSX.Element | null {
   );
 
   const settingsPanel = (
-    <div className={`panel settings-panel ${deleteConfirmOpen || detailsOpen || appearanceOpen ? "confirming" : ""}`}>
+    <div className={`panel settings-panel ${deleteConfirmOpen || detailsOpen || appearanceOpen || releaseHistoryOpen ? "confirming" : ""}`}>
       <div className="settings-content">
         <SettingsProfileForm />
         <header className="topbar settings-topbar" onScroll={handleSettingsScroll}>
@@ -193,6 +217,7 @@ export function PanelContent(): JSX.Element | null {
               onClick={() => {
                 setDeleteConfirmOpen(false);
                 setDetailsOpen(false);
+                setReleaseHistoryOpen(false);
                 setAppearanceSection("colors");
                 setAppearanceOpen(true);
               }}
@@ -205,6 +230,7 @@ export function PanelContent(): JSX.Element | null {
               onClick={() => {
                 setDeleteConfirmOpen(false);
                 setAppearanceOpen(false);
+                setReleaseHistoryOpen(false);
                 setDetailsOpen(true);
               }}
             >
@@ -217,6 +243,18 @@ export function PanelContent(): JSX.Element | null {
               onClick={() => void checkForUpdates()}
             >
               {updateState.status === "checking" ? "检查中" : "检查更新"}
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                setDeleteConfirmOpen(false);
+                setDetailsOpen(false);
+                setAppearanceOpen(false);
+                setReleaseHistoryOpen(true);
+              }}
+            >
+              版本公告
             </button>
             {updateAvailable ? (
               <button
@@ -251,6 +289,7 @@ export function PanelContent(): JSX.Element | null {
             onClick={() => {
               setDetailsOpen(false);
               setAppearanceOpen(false);
+              setReleaseHistoryOpen(false);
               setDeleteConfirmOpen(true);
             }}
           >
@@ -452,6 +491,14 @@ export function PanelContent(): JSX.Element | null {
         </div>
       ) : null}
 
+      {releaseHistoryOpen ? (
+        <ReleaseAnnouncementDialog
+          announcements={RELEASE_ANNOUNCEMENTS}
+          heading="历史版本公告"
+          onClose={() => setReleaseHistoryOpen(false)}
+        />
+      ) : null}
+
       {deleteConfirmOpen ? (
         <div className="settings-confirm-layer" role="dialog" aria-modal="true" aria-label="确认注销">
           <div className="settings-confirm-card">
@@ -481,5 +528,19 @@ export function PanelContent(): JSX.Element | null {
     </div>
   );
 
-  return panelView === "settings" ? settingsPanel : homePanel;
+  return (
+    <>
+      {panelView === "settings" ? settingsPanel : homePanel}
+      {currentReleaseOpen ? (
+        <ReleaseAnnouncementDialog
+          announcements={[getReleaseAnnouncement(CURRENT_APP_VERSION)]}
+          heading="本次更新内容"
+          onClose={() => {
+            rememberCurrentReleaseAnnouncement();
+            setCurrentReleaseOpen(false);
+          }}
+        />
+      ) : null}
+    </>
+  );
 }

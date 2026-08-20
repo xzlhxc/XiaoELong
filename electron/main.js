@@ -67,6 +67,11 @@ let divinePendingRevealRequestId = 0;
 let divineRevealFallbackTimer = null;
 let imageViewerWindow = null;
 let tray = null;
+let trayDefaultIcon = null;
+let trayBlankIcon = null;
+let trayBlinkTimer = null;
+let trayBlinkHidden = false;
+let trayUnreadFlashing = false;
 let serverProcess = null;
 let avatarDragState = null;
 let panelOpen = false;
@@ -864,6 +869,45 @@ function getTrayIcon() {
   return nativeImage.createEmpty();
 }
 
+function stopTrayBlinkTimer() {
+  if (trayBlinkTimer) {
+    clearInterval(trayBlinkTimer);
+    trayBlinkTimer = null;
+  }
+}
+
+function setTrayUnreadFlashing(active) {
+  const nextActive = Boolean(active);
+  trayUnreadFlashing = nextActive;
+  if (!tray || tray.isDestroyed()) {
+    if (nextActive) {
+      createTray();
+    } else {
+      stopTrayBlinkTimer();
+    }
+  }
+  if (!tray || tray.isDestroyed()) {
+    return;
+  }
+
+  stopTrayBlinkTimer();
+  trayBlinkHidden = false;
+  tray.setImage(trayDefaultIcon || getTrayIcon());
+  tray.setToolTip(nextActive ? "小鳄龙之家 · 有新消息" : "小鳄龙之家");
+  if (!nextActive) {
+    return;
+  }
+
+  trayBlinkTimer = setInterval(() => {
+    if (!tray || tray.isDestroyed()) {
+      stopTrayBlinkTimer();
+      return;
+    }
+    trayBlinkHidden = !trayBlinkHidden;
+    tray.setImage(trayBlinkHidden ? trayBlankIcon : trayDefaultIcon);
+  }, 500);
+}
+
 function hideAllWindows() {
   pendingPanelShow = false;
   panelRenderSession.cancel();
@@ -903,7 +947,9 @@ function createTray() {
     return tray;
   }
 
-  tray = new Tray(getTrayIcon());
+  trayDefaultIcon = getTrayIcon();
+  trayBlankIcon = nativeImage.createFromBitmap(Buffer.alloc(16 * 16 * 4), { width: 16, height: 16 });
+  tray = new Tray(trayDefaultIcon);
   tray.setToolTip("小鳄龙之家");
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -926,6 +972,9 @@ function createTray() {
   );
   tray.on("click", showCurrentModeFromTray);
   tray.on("double-click", showCurrentModeFromTray);
+  if (trayUnreadFlashing) {
+    setTrayUnreadFlashing(true);
+  }
   return tray;
 }
 
@@ -1435,6 +1484,7 @@ function updatePanelBounds() {
 }
 
 function showAuthMode() {
+  setTrayUnreadFlashing(false);
   closeDivineSelection({ showPanel: false });
   panelOpen = false;
   pendingAuthShow = true;
@@ -1864,7 +1914,15 @@ ipcMain.on("desktop:avatar-click-through", (_event, enabled) => {
   setAvatarClickThrough(Boolean(enabled));
 });
 
+ipcMain.on("desktop:tray-unread:set", (event, active) => {
+  if (!panelWindow || panelWindow.isDestroyed() || event.sender !== panelWindow.webContents) {
+    return;
+  }
+  setTrayUnreadFlashing(Boolean(active));
+});
+
 ipcMain.on("desktop:logout", () => {
+  setTrayUnreadFlashing(false);
   clearPersistedAccessToken();
   sendToRenderers("desktop:logout");
   currentWindowMode = "auth";
@@ -2027,6 +2085,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  stopTrayBlinkTimer();
   stopEmbeddedServer();
 });
 

@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS messages (
   file_mime_type VARCHAR(128) NULL,
   file_size INT NULL,
   reply_to_message_id BIGINT NULL,
+  mention_all BOOLEAN NOT NULL DEFAULT FALSE,
+  mentioned_user_ids TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_messages_created_at (created_at),
   KEY idx_messages_user_created_at (user_id, created_at),
@@ -117,6 +119,26 @@ PREPARE stmt FROM @add_messages_reply_to_message_id;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @add_messages_mention_all = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'mention_all') = 0,
+  'ALTER TABLE messages ADD COLUMN mention_all BOOLEAN NOT NULL DEFAULT FALSE AFTER reply_to_message_id',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_mention_all;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_messages_mentioned_user_ids = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'mentioned_user_ids') = 0,
+  'ALTER TABLE messages ADD COLUMN mentioned_user_ids TEXT NULL AFTER mention_all',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_messages_mentioned_user_ids;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @add_messages_reply_to_message_index = IF(
   (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND INDEX_NAME = 'idx_messages_reply_to_message_id') = 0,
@@ -137,9 +159,56 @@ PREPARE stmt FROM @add_messages_reply_to_message_fk;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+CREATE TABLE IF NOT EXISTS question_bank (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  source VARCHAR(32) NOT NULL,
+  source_question_id VARCHAR(96) NOT NULL,
+  category VARCHAR(32) NOT NULL DEFAULT '判断推理',
+  passage TEXT NULL,
+  question TEXT NOT NULL,
+  options JSON NOT NULL,
+  visual_type VARCHAR(32) NULL,
+  visual_data JSON NULL,
+  correct_answer_index INT NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  explanation TEXT NULL,
+  explanation_model VARCHAR(128) NULL,
+  explanation_generated_at DATETIME NULL,
+  validation_notes TEXT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  source_context TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_question_bank_source_question (source, source_question_id),
+  KEY idx_question_bank_ready (enabled, explanation_generated_at),
+  KEY idx_question_bank_category (category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @add_question_bank_visual_type = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'question_bank' AND COLUMN_NAME = 'visual_type') = 0,
+  'ALTER TABLE question_bank ADD COLUMN visual_type VARCHAR(32) NULL AFTER options',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_question_bank_visual_type;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_question_bank_visual_data = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'question_bank' AND COLUMN_NAME = 'visual_data') = 0,
+  'ALTER TABLE question_bank ADD COLUMN visual_data JSON NULL AFTER visual_type',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_question_bank_visual_data;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 CREATE TABLE IF NOT EXISTS daily_questions (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  bank_question_id BIGINT NULL,
   date DATE NOT NULL UNIQUE,
+  passage TEXT NULL,
   question TEXT NOT NULL,
   options JSON NOT NULL,
   visual_type VARCHAR(32) NULL,
@@ -147,12 +216,59 @@ CREATE TABLE IF NOT EXISTS daily_questions (
   category VARCHAR(32) NOT NULL DEFAULT '综合',
   correct_answer_index INT NOT NULL DEFAULT 0,
   explanation TEXT NULL,
-  source_type ENUM('online', 'fallback', 'manual') NOT NULL DEFAULT 'online',
+  source_type ENUM('question_bank', 'online', 'fallback', 'manual') NOT NULL DEFAULT 'question_bank',
   source_context TEXT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  KEY idx_daily_questions_created_at (created_at)
+  KEY idx_daily_questions_created_at (created_at),
+  KEY idx_daily_questions_bank_question (bank_question_id),
+  CONSTRAINT fk_daily_questions_bank_question
+    FOREIGN KEY (bank_question_id) REFERENCES question_bank(id)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @add_daily_questions_bank_question_id = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'bank_question_id') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN bank_question_id BIGINT NULL AFTER id',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_bank_question_id;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_daily_questions_passage = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND COLUMN_NAME = 'passage') = 0,
+  'ALTER TABLE daily_questions ADD COLUMN passage TEXT NULL AFTER date',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_passage;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+ALTER TABLE daily_questions
+  MODIFY COLUMN source_type ENUM('question_bank', 'online', 'fallback', 'manual') NOT NULL DEFAULT 'question_bank';
+
+SET @add_daily_questions_bank_question_index = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND INDEX_NAME = 'idx_daily_questions_bank_question') = 0,
+  'ALTER TABLE daily_questions ADD KEY idx_daily_questions_bank_question (bank_question_id)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_bank_question_index;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_daily_questions_bank_question_fk = IF(
+  (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+   WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'daily_questions' AND CONSTRAINT_NAME = 'fk_daily_questions_bank_question') = 0,
+  'ALTER TABLE daily_questions ADD CONSTRAINT fk_daily_questions_bank_question FOREIGN KEY (bank_question_id) REFERENCES question_bank(id) ON DELETE SET NULL',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_daily_questions_bank_question_fk;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 SET @add_daily_questions_category = IF(
   (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS

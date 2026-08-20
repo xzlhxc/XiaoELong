@@ -7,6 +7,7 @@ import type {
   ChatImageUploadResponse,
   ChatHistoryResponse,
   DailyQuestionAnswerResponse,
+  DailyQuestionDevPreviewResponse,
   DailyQuestionTodayResponse,
   DailyMoodSetPayload,
   DailyMoodSetResponse,
@@ -126,6 +127,17 @@ export async function submitTodayAnswer(
   payload: { questionId: number; answerIndex: number }
 ): Promise<DailyQuestionAnswerResponse> {
   return requestJson<DailyQuestionAnswerResponse>("/api/daily-question/answer", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getNextDevelopmentQuestion(
+  token: string,
+  payload: { preferredSource?: "logiqa2" | "cmmlu" | "raven_style"; excludedBankQuestionIds: number[] }
+): Promise<DailyQuestionDevPreviewResponse> {
+  return requestJson<DailyQuestionDevPreviewResponse>("/api/daily-question/dev/next", {
     method: "POST",
     token,
     body: JSON.stringify(payload)

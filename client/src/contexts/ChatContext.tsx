@@ -37,6 +37,8 @@ export interface SendMessagePayload {
   imageFile: File | null;
   fileFile: File | null;
   replyToMessageId?: number | null;
+  mentionAll?: boolean;
+  mentionedUserIds?: string[];
 }
 
 /** ChatPanel 跨挂载的滚动位置记忆，由 Provider 常驻持有（切 tab 卸载后仍存活） */
@@ -287,6 +289,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     historySessionVersionRef.current += 1;
     olderHistoryInFlightRef.current = false;
     scrollMemoryRef.current = null;
+    window.xiaoelongDesktop?.setTrayUnread?.(false);
     dispatch({ type: "CLEAR" });
   }, []);
 
@@ -438,6 +441,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             if (canceled) {
               return;
             }
+            const latestKnownMessageId = messagesRef.current[messagesRef.current.length - 1]?.id ?? null;
+            const recoveredExternalMessage = latestKnownMessageId === null
+              ? null
+              : history.messages.find(
+                  (message) => message.id > latestKnownMessageId && message.user.id !== currentUserId
+                );
+            if (desktopRole === "panel" && recoveredExternalMessage) {
+              window.xiaoelongDesktop?.setTrayUnread?.(true);
+            }
             dispatch({ type: "MERGE_MESSAGES", payload: history.messages });
           } catch (error) {
             if (canceled) {
@@ -483,6 +495,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "UPDATE_MOOD_IN_PRESENCE", payload: { userId: payload.userId, mood: payload.mood } });
     };
     const handleChatMessage = (message: ChatMessage): void => {
+      if (desktopRole === "panel" && message.user.id !== currentUserId) {
+        window.xiaoelongDesktop?.setTrayUnread?.(true);
+      }
       dispatch({ type: "ADD_MESSAGE", payload: message });
     };
     const handleOnline = (): void => {
@@ -581,7 +596,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             content: payload.content,
             image,
             file,
-            replyToMessageId: payload.replyToMessageId
+            replyToMessageId: payload.replyToMessageId,
+            mentionAll: payload.mentionAll,
+            mentionedUserIds: payload.mentionedUserIds
           }, (ack) => {
             if (settled) {
               return;

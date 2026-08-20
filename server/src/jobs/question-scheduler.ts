@@ -8,9 +8,9 @@ export function startQuestionScheduler(service: DailyQuestionService): void {
     async () => {
       try {
         const question = await service.ensureTodayQuestion();
-        console.log(`[DailyQuestion] Scheduled generation ready for ${question.date} (${question.sourceType}).`);
+        console.log(`[DailyQuestion] Scheduled question ready for ${question.date} (${question.sourceType}).`);
       } catch (error) {
-        console.error("[DailyQuestion] Scheduled generation failed:", error);
+        console.error("[DailyQuestion] Scheduled question selection failed:", error);
       }
     },
     {

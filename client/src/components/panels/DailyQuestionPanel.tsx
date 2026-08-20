@@ -1,13 +1,20 @@
-import { memo } from "react";
+import { memo, useRef, useState } from "react";
 import type {
+  DailyQuestionDevPreviewResponse,
   DailyQuestionResult,
   DailyQuestionStats,
+  DailyQuestionTodayResponse,
   DailyQuestionVisual,
-  DailyQuestionVoter
+  DailyQuestionVoter,
+  MatrixPatternTile
 } from "@xiaoelong/shared";
+import { getNextDevelopmentQuestion } from "../../services/api";
+import { useAuth } from "../../contexts/AuthContext";
 import { useDaily } from "../../contexts/DailyContext";
 import { RefreshStatus, useRefreshFeedback } from "../atoms/RefreshStatus";
 import { UserAvatar } from "../atoms/UserAvatar";
+
+const DEVELOPMENT_SOURCE_ORDER = ["raven_style", "cmmlu", "logiqa2"] as const;
 
 function getPercent(count: number, total: number): number {
   if (total <= 0) {
@@ -18,6 +25,27 @@ function getPercent(count: number, total: number): number {
 
 function getChoiceLabel(index: number): string {
   return String.fromCharCode(65 + index);
+}
+
+function formatChinesePunctuation(value: string): string {
+  return value
+    .replace(/([\p{Script=Han}）】》”’])\s*,\s*/gu, "$1，")
+    .replace(/,\s*(?=[\p{Script=Han}（【《“‘])/gu, "，")
+    .replace(/([\p{Script=Han}）】》”’])\s*\.(?=\s*(?:[\p{Script=Han}（【《“‘]|$))/gu, "$1。");
+}
+
+function getQuestionSourceLabel(sourceType: string, sourceContext: string | null): string | null {
+  if (sourceType !== "question_bank" || !sourceContext) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(sourceContext) as { title?: unknown; license?: unknown };
+    const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
+    const license = typeof parsed.license === "string" ? parsed.license.trim() : "";
+    return title ? `题库：${title}${license ? ` · ${license}` : ""}` : null;
+  } catch {
+    return null;
+  }
 }
 
 function clampIndex(value: number, max: number): number {
@@ -227,6 +255,88 @@ function TriangleVisual(props: { visual: Extract<DailyQuestionVisual, { type: "t
   );
 }
 
+function polygonPoints(sides: number, radius: number): string {
+  return Array.from({ length: sides }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / sides;
+    return `${Math.cos(angle) * radius},${Math.sin(angle) * radius}`;
+  }).join(" ");
+}
+
+function MatrixPatternSymbol(props: { tile: MatrixPatternTile; centerX: number; centerY: number }): JSX.Element {
+  const count = Math.max(1, Math.min(4, props.tile.count));
+  const spread = count === 1
+    ? [{ x: ((props.tile.position % 3) - 1) * 18, y: (Math.floor(props.tile.position / 3) - 1) * 18 }]
+    : count === 2
+      ? [{ x: -11, y: 0 }, { x: 11, y: 0 }]
+      : count === 3
+        ? [{ x: 0, y: -12 }, { x: -12, y: 10 }, { x: 12, y: 10 }]
+        : [{ x: -11, y: -11 }, { x: 11, y: -11 }, { x: -11, y: 11 }, { x: 11, y: 11 }];
+  const radius = count === 1 ? 13 : 8;
+  const className = `matrix-pattern-shape ${props.tile.filled ? "filled" : "outline"}`;
+
+  return (
+    <g transform={`translate(${props.centerX} ${props.centerY}) rotate(${props.tile.rotation})`}>
+      {spread.map((offset, index) => (
+        <g key={index} transform={`translate(${offset.x} ${offset.y})`}>
+          {props.tile.shape === "circle" ? <circle r={radius} className={className} /> : null}
+          {props.tile.shape === "square" ? <rect x={-radius} y={-radius} width={radius * 2} height={radius * 2} className={className} /> : null}
+          {props.tile.shape === "diamond" ? <polygon points={`0,${-radius} ${radius},0 0,${radius} ${-radius},0`} className={className} /> : null}
+          {props.tile.shape === "triangle" ? <polygon points={polygonPoints(3, radius + 1)} className={className} /> : null}
+          {props.tile.shape === "pentagon" ? <polygon points={polygonPoints(5, radius + 1)} className={className} /> : null}
+          {props.tile.shape === "hexagon" ? <polygon points={polygonPoints(6, radius + 1)} className={className} /> : null}
+          {props.tile.shape === "arrow" ? (
+            <path
+              d={`M ${-radius} ${-radius * 0.45} H 1 V ${-radius} L ${radius} 0 L 1 ${radius} V ${radius * 0.45} H ${-radius} Z`}
+              className={className}
+            />
+          ) : null}
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function MatrixPatternVisual(props: { visual: Extract<DailyQuestionVisual, { type: "matrixPattern" }> }): JSX.Element {
+  const matrixX = 75;
+  const matrixY = 18;
+  const cellSize = 84;
+  const cellGap = 6;
+  const step = cellSize + cellGap;
+  return (
+    <svg className="question-visual-svg matrix-pattern-svg" viewBox="0 0 420 430" preserveAspectRatio="xMidYMid meet" role="img" aria-label="图形推理矩阵">
+      {Array.from({ length: 9 }, (_, index) => {
+        const row = Math.floor(index / 3);
+        const column = index % 3;
+        const x = matrixX + column * step;
+        const y = matrixY + row * step;
+        const current = props.visual.data.cells[index] ?? null;
+        return (
+          <g key={`matrix-${index}`}>
+            <rect x={x} y={y} width={cellSize} height={cellSize} rx="9" className="matrix-pattern-cell" />
+            {current ? (
+              <MatrixPatternSymbol tile={current} centerX={x + cellSize / 2} centerY={y + cellSize / 2} />
+            ) : (
+              <text x={x + cellSize / 2} y={y + cellSize / 2 + 2} className="matrix-pattern-question" textAnchor="middle" dominantBaseline="middle">?</text>
+            )}
+          </g>
+        );
+      })}
+      <text x="24" y="322" className="matrix-pattern-caption">选项</text>
+      {props.visual.data.choices.slice(0, 4).map((choice, index) => {
+        const x = 24 + index * 99;
+        const y = 338;
+        return (
+          <g key={`choice-${index}`}>
+            <rect x={x} y={y} width="82" height="76" rx="9" className="matrix-pattern-cell choice" />
+            <text x={x + 10} y={y + 16} className="matrix-pattern-choice-label">{getChoiceLabel(index)}</text>
+            <MatrixPatternSymbol tile={choice} centerX={x + 41} centerY={y + 42} />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function QuestionVisual(props: { visual: DailyQuestionVisual | null }): JSX.Element | null {
   if (!props.visual) {
     return null;
@@ -241,6 +351,7 @@ function QuestionVisual(props: { visual: DailyQuestionVisual | null }): JSX.Elem
       {visual.type === "barChart" ? <BarChartVisual visual={visual} /> : null}
       {visual.type === "logicTable" ? <LogicTableVisual visual={visual} /> : null}
       {visual.type === "triangle" ? <TriangleVisual visual={visual} /> : null}
+      {visual.type === "matrixPattern" ? <MatrixPatternVisual visual={visual} /> : null}
     </div>
   );
 }
@@ -256,14 +367,14 @@ function VoterChip(props: { voter: DailyQuestionVoter }): JSX.Element {
 }
 
 function ResultSummary(props: { result: DailyQuestionResult; options: string[] }): JSX.Element {
-  const correctOption = props.options[props.result.correctAnswerIndex] ?? "";
+  const correctOption = formatChinesePunctuation(props.options[props.result.correctAnswerIndex] ?? "");
   return (
     <div className={`question-result ${props.result.isCorrect ? "correct" : "wrong"}`}>
       <strong>{props.result.isCorrect ? "答对了" : "答错了"}</strong>
       <span>
         正确答案：{getChoiceLabel(props.result.correctAnswerIndex)}. {correctOption}
       </span>
-      <p>{props.result.explanation}</p>
+      <p>{formatChinesePunctuation(props.result.explanation)}</p>
     </div>
   );
 }
@@ -290,7 +401,7 @@ function renderStats(
             <div className="question-stat-top">
               <div>
                 <span className="question-choice-index">{getChoiceLabel(index)}</span>
-                <span>{option}</span>
+                <span>{formatChinesePunctuation(option)}</span>
               </div>
               <strong>
                 {count} 票 · {percent}%
@@ -311,15 +422,113 @@ function renderStats(
 
 export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Element {
   const { dailyData, dailyLoading, dailyError, refreshDaily, answerDaily } = useDaily();
+  const { token } = useAuth();
   const { isRefreshing, runRefresh } = useRefreshFeedback(refreshDaily, dailyLoading);
+  const [developmentPreview, setDevelopmentPreview] = useState<{
+    bankQuestionId: number;
+    correctAnswerIndex: number;
+    explanation: string;
+    data: DailyQuestionTodayResponse;
+  } | null>(null);
+  const [developmentLoading, setDevelopmentLoading] = useState(false);
+  const [developmentError, setDevelopmentError] = useState<string | null>(null);
+  const developmentSeenIdsRef = useRef(new Set<number>());
+  const developmentSourceIndexRef = useRef(0);
 
-  if (!dailyData) {
+  const shownData = developmentPreview?.data ?? dailyData;
+
+  async function showNextDevelopmentQuestion(): Promise<void> {
+    if (!token || developmentLoading) {
+      return;
+    }
+    setDevelopmentLoading(true);
+    setDevelopmentError(null);
+    try {
+      const preferredSource = DEVELOPMENT_SOURCE_ORDER[
+        developmentSourceIndexRef.current % DEVELOPMENT_SOURCE_ORDER.length
+      ];
+      const preview: DailyQuestionDevPreviewResponse = await getNextDevelopmentQuestion(token, {
+        preferredSource,
+        excludedBankQuestionIds: [...developmentSeenIdsRef.current]
+      });
+      if (preview.resetSeen || developmentSeenIdsRef.current.has(preview.bankQuestionId)) {
+        developmentSeenIdsRef.current.clear();
+      }
+      developmentSeenIdsRef.current.add(preview.bankQuestionId);
+      developmentSourceIndexRef.current += 1;
+      setDevelopmentPreview({
+        bankQuestionId: preview.bankQuestionId,
+        correctAnswerIndex: preview.correctAnswerIndex,
+        explanation: preview.explanation,
+        data: {
+          question: preview.question,
+          stats: {
+            questionId: preview.question.id,
+            counts: preview.question.options.map(() => 0),
+            totalAnswers: 0,
+            voters: preview.question.options.map(() => [])
+          },
+          answeredIndex: null,
+          result: null
+        }
+      });
+    } catch (error) {
+      setDevelopmentError(error instanceof Error ? error.message : "加载下一题失败。");
+    } finally {
+      setDevelopmentLoading(false);
+    }
+  }
+
+  function answerShownQuestion(answerIndex: number): void {
+    if (!developmentPreview) {
+      void answerDaily(answerIndex);
+      return;
+    }
+
+    const counts = developmentPreview.data.question.options.map((_, index) => index === answerIndex ? 1 : 0);
+    setDevelopmentPreview({
+      ...developmentPreview,
+      data: {
+        ...developmentPreview.data,
+        answeredIndex: answerIndex,
+        stats: {
+          ...developmentPreview.data.stats,
+          counts,
+          totalAnswers: 1
+        },
+        result: {
+          answeredIndex: answerIndex,
+          correctAnswerIndex: developmentPreview.correctAnswerIndex,
+          isCorrect: answerIndex === developmentPreview.correctAnswerIndex,
+          explanation: developmentPreview.explanation
+        }
+      }
+    });
+  }
+
+  async function refreshCurrentQuestion(): Promise<void> {
+    setDevelopmentPreview(null);
+    setDevelopmentError(null);
+    await runRefresh();
+  }
+
+  if (!shownData) {
     return (
       <section className="module-card daily-card">
         <div className="module-head daily-head">
           <h2>每日一题</h2>
           <div className="daily-actions">
             <RefreshStatus active={isRefreshing} />
+            {import.meta.env.DEV ? (
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={!token || developmentLoading}
+                onClick={() => void showNextDevelopmentQuestion()}
+              >
+                {developmentLoading ? "加载中" : "下一题"}
+              </button>
+            ) : null}
             <button
               type="button"
               className="ghost-button"
@@ -337,8 +546,9 @@ export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Elemen
     );
   }
 
-  const { question, stats, answeredIndex, result } = dailyData;
+  const { question, stats, answeredIndex, result } = shownData;
   const answered = answeredIndex !== null;
+  const sourceLabel = getQuestionSourceLabel(question.sourceType, question.sourceContext);
 
   return (
     <section className="module-card daily-card">
@@ -347,14 +557,25 @@ export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Elemen
           <h2>每日一题</h2>
           <span className="question-category">{question.category}</span>
           <span className="question-date">{question.date}</span>
+          {sourceLabel ? <span className="question-source">{sourceLabel}</span> : null}
         </div>
         <div className="daily-actions">
           <RefreshStatus active={isRefreshing} />
+          {import.meta.env.DEV ? (
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={!token || developmentLoading}
+              onClick={() => void showNextDevelopmentQuestion()}
+            >
+              {developmentLoading ? "加载中" : "下一题"}
+            </button>
+          ) : null}
           <button
             type="button"
             className="ghost-button"
-            disabled={isRefreshing}
-            onClick={() => void runRefresh()}
+            disabled={isRefreshing || developmentLoading}
+            onClick={() => void refreshCurrentQuestion()}
           >
             刷新
           </button>
@@ -362,15 +583,16 @@ export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Elemen
       </div>
 
       <div className="daily-content">
-        <h3 className="question-title">{question.question}</h3>
+        {question.passage ? <div className="question-passage">{formatChinesePunctuation(question.passage)}</div> : null}
+        <h3 className="question-title">{formatChinesePunctuation(question.question)}</h3>
         <QuestionVisual visual={question.visual} />
 
         {!answered ? (
           <div className="question-options">
             {question.options.map((option, index) => (
-              <button key={index} type="button" onClick={() => void answerDaily(index)}>
+              <button key={index} type="button" onClick={() => answerShownQuestion(index)}>
                 <span>{getChoiceLabel(index)}</span>
-                {option}
+                {formatChinesePunctuation(option)}
               </button>
             ))}
           </div>
@@ -382,7 +604,7 @@ export const DailyQuestionPanel = memo(function DailyQuestionPanel(): JSX.Elemen
           </>
         )}
 
-        {dailyError ? <p className="error-text">{dailyError}</p> : null}
+        {dailyError || developmentError ? <p className="error-text">{developmentError || dailyError}</p> : null}
       </div>
     </section>
   );

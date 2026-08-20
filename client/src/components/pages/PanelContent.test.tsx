@@ -130,7 +130,7 @@ afterEach(() => {
 describe("PanelContent 正常路径", () => {
   it("有用户时渲染 homePanel：topbar + 4 个 tab 按钮", () => {
     render(<PanelContent />);
-    expect(screen.getByText("小鳄龙之家")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "小鳄龙之家" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "聊天" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "每日一题" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "神选" })).toBeTruthy();

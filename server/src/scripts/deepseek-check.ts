@@ -1,5 +1,5 @@
 import { env } from "../config/env.js";
-import { createQuestionGeneratorProvider } from "../services/question-generator/deepseek-provider.js";
+import { generateQuestionExplanation } from "../services/question-bank-explanation.js";
 
 interface ModelListResponse {
   data?: Array<{ id?: string }>;
@@ -55,23 +55,25 @@ async function run(): Promise<void> {
   }
   console.log(`[DeepSeekCheck] Authentication succeeded. Available models: ${models.join(", ")}.`);
 
-  const generated = await createQuestionGeneratorProvider().generate({
-    date: new Intl.DateTimeFormat("en-CA", {
-      timeZone: env.QUESTION_TIMEZONE,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    }).format(new Date()),
-    avoidQuestions: []
+  const review = await generateQuestionExplanation({
+    id: 0,
+    source: "diagnostic",
+    sourceQuestionId: "deepseek-check",
+    category: "数学推理",
+    passage: null,
+    question: "一件商品原价 100 元，先涨价 20%，再降价 20%，现价是多少？",
+    options: ["96 元", "100 元", "104 元", "80 元"],
+    visual: null,
+    correctAnswerIndex: 0,
+    explanation: null,
+    sourceContext: null
   });
+  if (!review.valid) {
+    throw new Error(`DeepSeek rejected the diagnostic question: ${review.reason}`);
+  }
 
-  console.log("[DeepSeekCheck] Generated question passed schema validation.");
-  console.log(JSON.stringify({
-    category: generated.category,
-    question: generated.question,
-    options: generated.options,
-    sourceContext: generated.sourceContext
-  }, null, 2));
+  console.log("[DeepSeekCheck] Explanation review passed schema validation.");
+  console.log(JSON.stringify(review, null, 2));
 }
 
 void run().catch((error: unknown) => {

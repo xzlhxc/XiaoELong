@@ -1,6 +1,6 @@
 {
   "name": "xiaoelong-monorepo",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "private": true,
   "engines": {
     "node": ">=22.22.2 <23"
@@ -21,6 +21,8 @@
     "build:cloud": "npm run clean && npm run build --workspace shared && npm run build --workspace server && cross-env VITE_SERVER_URL=http://43.139.223.204:3001 npm run build --workspace client",
     "db:init": "npm run db:init --workspace server",
     "deepseek:check": "npm run build --workspace shared && npm run build --workspace server && npm run deepseek:check --workspace server",
+    "question-bank:import": "npm run build --workspace shared && npm run build --workspace server && npm run question-bank:import --workspace server --",
+    "question-bank:explain": "npm run build --workspace shared && npm run build --workspace server && npm run question-bank:explain --workspace server --",
     "mac:update-manifest": "node scripts/create-mac-update-manifest.mjs",
     "server:deploy": "node scripts/clean.mjs --server-only && npm run build --workspace shared && npm run build --workspace server && node scripts/build-server-deploy.mjs",
     "electron:pack": "npm run build:cloud && electron-builder --dir",

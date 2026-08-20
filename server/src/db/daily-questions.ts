@@ -11,15 +11,17 @@ export interface DailyQuestionRecord extends DailyQuestion {
 
 interface DailyQuestionRow extends RowDataPacket {
   id: number;
+  bank_question_id: number | string | null;
   date: Date | string;
   category: string | null;
+  passage: string | null;
   question: string;
   options: string | string[];
   visual_type: DailyQuestionVisual["type"] | null;
   visual_data: string | DailyQuestionVisual["data"] | null;
   correct_answer_index: number | null;
   explanation: string | null;
-  source_type: "online" | "fallback" | "manual";
+  source_type: "question_bank" | "online" | "fallback" | "manual";
   source_context: string | null;
   created_at: Date | string;
 }
@@ -43,14 +45,16 @@ interface DailyAnswerByUserRow extends RowDataPacket {
 }
 
 interface CreateDailyQuestionInput {
+  bankQuestionId: number | null;
   date: string;
   category: string;
+  passage: string | null;
   question: string;
   options: string[];
   visual: DailyQuestionVisual | null;
   correctAnswerIndex: number;
   explanation: string;
-  sourceType: "online" | "fallback" | "manual";
+  sourceType: "question_bank" | "online" | "fallback" | "manual";
   sourceContext: string | null;
 }
 
@@ -104,6 +108,7 @@ function mapDailyQuestion(row: DailyQuestionRow): DailyQuestionRecord {
     id: row.id,
     date: questionDate,
     category: row.category || "综合",
+    passage: row.passage?.trim() || null,
     question: row.question,
     options,
     visual,
@@ -121,6 +126,7 @@ export function toPublicDailyQuestion(question: DailyQuestionRecord): DailyQuest
     id: question.id,
     date: question.date,
     category: question.category,
+    passage: question.passage,
     question: question.question,
     options: question.options,
     visual: question.visual,
@@ -132,7 +138,7 @@ export function toPublicDailyQuestion(question: DailyQuestionRecord): DailyQuest
 
 export async function getDailyQuestionByDate(date: string): Promise<DailyQuestionRecord | null> {
   const [rows] = await pool.query<DailyQuestionRow[]>(
-    `SELECT id, date, category, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context, created_at
+    `SELECT id, bank_question_id, date, category, passage, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context, created_at
      FROM daily_questions
      WHERE date = ?
      LIMIT 1`,
@@ -147,7 +153,7 @@ export async function getDailyQuestionByDate(date: string): Promise<DailyQuestio
 
 export async function getDailyQuestionById(id: number): Promise<DailyQuestionRecord | null> {
   const [rows] = await pool.query<DailyQuestionRow[]>(
-    `SELECT id, date, category, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context, created_at
+    `SELECT id, bank_question_id, date, category, passage, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context, created_at
      FROM daily_questions
      WHERE id = ?
      LIMIT 1`,
@@ -176,11 +182,13 @@ export async function listRecentQuestionTexts(beforeDate: string, limit = 10): P
 export async function createDailyQuestion(input: CreateDailyQuestionInput): Promise<DailyQuestionRecord> {
   const [result] = await pool.execute<ResultSetHeader>(
     `INSERT INTO daily_questions
-       (date, category, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (bank_question_id, date, category, passage, question, options, visual_type, visual_data, correct_answer_index, explanation, source_type, source_context)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
+      input.bankQuestionId,
       input.date,
       input.category,
+      input.passage,
       input.question,
       JSON.stringify(input.options),
       input.visual?.type ?? null,

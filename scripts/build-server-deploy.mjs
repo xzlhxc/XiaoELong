@@ -90,6 +90,10 @@ try {
     path.join(staging, "README-SERVER.md")
   );
   await cp(
+    path.join(repositoryRoot, "docs", "question-bank-sources.md"),
+    path.join(staging, "QUESTION-BANK-SOURCES.md")
+  );
+  await cp(
     path.join(deploySource, "package.json"),
     path.join(staging, "package.json")
   );

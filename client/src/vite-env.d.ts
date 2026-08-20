@@ -86,6 +86,7 @@ interface Window {
     readonly hideAllWindows?: () => void;
     readonly setMoodPromptVisible?: (visible: boolean) => void;
     readonly setAvatarClickThrough?: (enabled: boolean) => void;
+    readonly setTrayUnread?: (active: boolean) => void;
     readonly openImageViewer?: (payload: {
       images: Array<{
         url: string;

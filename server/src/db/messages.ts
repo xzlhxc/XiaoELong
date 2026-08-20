@@ -15,6 +15,8 @@ const MESSAGE_WITH_USER_SELECT = `
     m.file_name,
     m.file_mime_type,
     m.file_size,
+    m.mention_all,
+    m.mentioned_user_ids,
     m.created_at,
     u.id AS user_id,
     u.nickname,
@@ -46,6 +48,8 @@ interface CreateMessageInput {
   image: ChatImage | null;
   file: ChatFile | null;
   replyToMessageId: number | null;
+  mentionAll: boolean;
+  mentionedUserIds: string[];
 }
 
 interface MessageExistsRow extends RowDataPacket {
@@ -65,9 +69,11 @@ export async function createMessage(userId: string, input: CreateMessageInput): 
        file_name,
        file_mime_type,
        file_size,
-       reply_to_message_id
+       reply_to_message_id,
+       mention_all,
+       mentioned_user_ids
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userId,
       input.content,
@@ -79,7 +85,9 @@ export async function createMessage(userId: string, input: CreateMessageInput): 
       input.file?.name ?? null,
       input.file?.mimeType ?? null,
       input.file?.size ?? null,
-      input.replyToMessageId
+      input.replyToMessageId,
+      input.mentionAll,
+      input.mentionedUserIds.length > 0 ? JSON.stringify(input.mentionedUserIds) : null
     ]
   );
 

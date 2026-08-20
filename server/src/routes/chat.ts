@@ -8,6 +8,7 @@ import { env } from "../config/env.js";
 import { getRecentMessages } from "../db/messages.js";
 import { requireAuth } from "../middleware/auth.js";
 import { isAllowedChatFileName, isAllowedChatImageMimeType } from "../utils/chat.js";
+import { normalizeUtf8Filename } from "../utils/filename.js";
 import { chatFileDir, chatImageDir } from "../utils/uploads.js";
 
 const router = Router();
@@ -29,7 +30,7 @@ function getExtensionForMimeType(mimeType: string): string {
 }
 
 function getSafeOriginalName(originalName: string): string {
-  const basename = path.basename(originalName || "image");
+  const basename = path.basename(normalizeUtf8Filename(originalName) || "image");
   return (
     sanitizeHtml(basename, {
       allowedTags: [],
@@ -64,7 +65,7 @@ const chatImageUpload = multer({
 });
 
 function getExtensionForOriginalName(originalName: string): string {
-  const extension = path.extname(originalName || "").toLowerCase();
+  const extension = path.extname(normalizeUtf8Filename(originalName) || "").toLowerCase();
   return extension && extension.length <= 16 ? extension : ".bin";
 }
 
@@ -83,7 +84,7 @@ const chatFileUpload = multer({
     fileSize: env.MAX_CHAT_FILE_SIZE_MB * 1024 * 1024
   },
   fileFilter(_req, file, cb) {
-    if (!isAllowedChatFileName(file.originalname)) {
+    if (!isAllowedChatFileName(normalizeUtf8Filename(file.originalname))) {
       cb(new Error("Chat file type is not allowed."));
       return;
     }

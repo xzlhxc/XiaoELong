@@ -1,12 +1,12 @@
 # XiaoELong 项目架构文档
 
-> 版本：2.1.2 | 更新日期：2026-08-17
+> 版本：2.2.0 | 更新日期：2026-08-20
 
 ---
 
 ## 一、项目概览
 
-XiaoELong（小鳄龙之家）是一个面向固定小群使用的 Windows/macOS 桌面伴侣应用。以 Electron 桌面悬浮入口为载体，提供实时聊天、每日心情、每日一题（AI 生成）、神选膜拜、五子棋对战等功能。
+XiaoELong（小鳄龙之家）是一个面向固定小群使用的 Windows/macOS 桌面伴侣应用。以 Electron 桌面悬浮入口为载体，提供实时聊天、每日心情、固定题库每日一题、神选膜拜、五子棋对战等功能。
 
 ### 技术栈总览
 
@@ -16,7 +16,7 @@ XiaoELong（小鳄龙之家）是一个面向固定小群使用的 Windows/macOS
 | 前端 | React 18 + TypeScript 5 + Vite 5 |
 | 后端 | Node.js 22.23.1 + Express 4 + Socket.io 4 |
 | 数据库 | MySQL 8.0 |
-| AI 集成 | DeepSeek API（每日一题生成） |
+| AI 集成 | DeepSeek API（题库答案复核与解析生成，不生成题目） |
 | 共享契约 | `@xiaoelong/shared`（npm workspace 内部包） |
 | 包管理 | npm workspaces（monorepo） |
 | 测试 | Vitest |
@@ -81,11 +81,10 @@ XiaoELong/
 │       │   └── gomoku-events.ts     # 五子棋事件广播辅助
 │       ├── services/                # 业务逻辑层
 │       │   ├── gomoku-service.ts    # 五子棋：创建、落子、撤回、胜负判定（含事务）
-│       │   ├── daily-question-service.ts # 每日一题：生成、答题、统计
-│       │   └── question-generator/  # 题目生成器（策略模式）
-│       │       ├── provider.ts      # 生成器接口定义
-│       │       ├── deepseek-provider.ts # DeepSeek AI 生成 + 本地 fallback
-│       │       └── mock-provider.ts # 测试用 Mock 生成器
+│       │   ├── daily-question-service.ts # 每日一题：题库抽取、答题、统计
+│       │   ├── question-bank-sources.ts # 固定版本开源题库下载与标准化
+│       │   ├── question-bank-explanation.ts # DeepSeek 复核与解析生成
+│       │   └── visual-question-bank.ts # 程序化图形推理题生成
 │       ├── db/                      # 数据库访问层
 │       │   ├── init.sql             # ★ 数据库建表 + 迁移 SQL
 │       │   ├── init.ts              # 数据库初始化脚本
@@ -93,20 +92,23 @@ XiaoELong/
 │       │   ├── users.ts             # 用户 CRUD
 │       │   ├── messages.ts          # 消息存取
 │       │   ├── daily-questions.ts   # 每日一题存取
+│       │   ├── question-bank.ts     # 题库导入、解析状态与抽取
 │       │   ├── daily-moods.ts       # 每日心情存取
 │       │   ├── deity-worships.ts    # 神选膜拜存取
 │       │   └── mappers.ts           # 数据库行 → 领域对象映射
 │       ├── middleware/
 │       │   └── auth.ts              # JWT 认证中间件（Bearer token 提取 + 验证）
 │       ├── jobs/
-│       │   └── question-scheduler.ts # 每日一题定时生成（node-cron）
+│       │   └── question-scheduler.ts # 每日一题定时抽取（node-cron）
 │       ├── utils/
 │       │   ├── jwt.ts               # JWT 签发/验证
 │       │   ├── chat.ts              # 聊天内容清洗（sanitize-html + XSS 防护）
 │       │   ├── uploads.ts           # 文件上传目录管理
 │       │   └── time.ts              # 时区工具
 │       ├── scripts/
-│       │   └── deepseek-check.ts    # DeepSeek API 诊断脚本
+│       │   ├── deepseek-check.ts    # DeepSeek 解析能力诊断脚本
+│       │   ├── question-bank-import.ts # 固定题库导入脚本
+│       │   └── question-bank-explain.ts # 题库复核与解析脚本
 │       └── types/
 │           └── express.d.ts         # Express Request 类型扩展
 │
@@ -302,7 +304,7 @@ DB Layer (数据访问层)   → SQL 查询/事务 → 行映射 → 返回领�
 |------|------|
 | REST + Socket 双通道 | REST 处理一次性请求（CRUD），Socket 处理实时推送（消息、状态变更） |
 | Service 层独立 | 五子棋和每日一题的业务逻辑从路由/Socket 中抽离，可独立测试 |
-| 策略模式（题目生成） | `QuestionGeneratorProvider` 接口 → DeepSeek 在线 + 本地 fallback |
+| 题库硬性去重 | 每日仅抽取已复核、有解析且内容从未作为每日题出现过的固定题库题目；耗尽时返回明确的不可用状态 |
 | 数据库事务 | 五子棋落子和撤回使用 `FOR UPDATE` 行锁 + 事务保证并发安全 |
 | JWT 双重认证 | REST 用 `Authorization: Bearer` 头，Socket 用 `auth.token` 握手参数 |
 
@@ -326,15 +328,25 @@ messages (聊天消息)
 
 daily_questions (每日一题)
 ├── id: INT AUTO_INCREMENT PK
+├── bank_question_id: BIGINT FK → question_bank(id)
 ├── date: DATE UNIQUE
+├── passage: TEXT（可空）
 ├── category: VARCHAR(32)
 ├── question: TEXT
 ├── options: JSON
 ├── visual_type/visual_data (可空，附图)
 ├── correct_answer_index: INT
 ├── explanation: TEXT
-├── source_type: ENUM('online','fallback','manual')
+├── source_type: ENUM('question_bank','online','fallback','manual')
 └── source_context: TEXT
+
+question_bank (固定题库)
+├── id/source/source_question_id
+├── category/passage/question/options/visual_type/visual_data
+├── correct_answer_index/content_hash
+├── explanation/explanation_model/explanation_generated_at
+├── validation_notes/enabled
+└── UNIQUE(source, source_question_id)
 
 daily_answers (答题记录)
 ├── id: BIGINT AUTO_INCREMENT PK
@@ -423,18 +435,18 @@ Socket: io(url, { auth: { token } }) → socket middleware → socket.data.userI
                                                                      9. React 重渲染聊天列表
 ```
 
-### 4.3 每日一题生成与答题
+### 4.3 每日一题题库准备、抽取与答题
 
 ```
 定时任务 (node-cron, 每天 8:00 Asia/Shanghai)
 │
 ├── 1. check 今天是否已有题目 → 有则跳过
 ├── 2. 同一日期的并发 ensure 合并为一个 Promise
-├── 3. 调用 DeepSeek API 生成题目
-│      ├── 全程 JSON Output，并按解析/结构错误最多重试 3 次
-│      ├── 最后一次强制 visual=null，优先保住无附图在线题
-│      ├── 成功 → 存入 DB，source_type="online"
-│      └── 失败 → 使用本地 fallback 题库，source_type="fallback"
+├── 3. 从 question_bank 选择 enabled 且已有 explanation 的题目
+│      ├── 按内容指纹与历史题面硬性排除所有已使用题目
+│      ├── 在剩余题目中按题源历史使用次数均衡选择
+│      ├── 成功 → 复制到 daily_questions，source_type="question_bank"
+│      └── 无可用题 → 返回 503，提示补充并审核新题
 ├── 4. 跨进程重复写入时回读 date 唯一键对应的正式题目
 └── 5. 日志记录生成结果
 
@@ -613,7 +625,7 @@ npm run electron:dist:mac → macOS DMG + ZIP（universal）
 | **分层清晰** | Routes → Services → DB 三层分离，业务逻辑可独立测试 |
 | **安全防护** | JWT 认证、sanitize-html 防 XSS、multer 文件类型校验、zod 输入校验 |
 | **并发安全** | 五子棋落子与撤回使用数据库行锁 + 事务保证并发正确性 |
-| **容错设计** | DeepSeek 失败自动 fallback 到本地题库；面板渲染崩溃自动恢复；Socket 断线提示并在恢复后合并补拉聊天记录 |
+| **容错设计** | 未出题库耗尽时返回明确状态且绝不复用旧题；面板渲染崩溃自动恢复；Socket 断线提示并在恢复后合并补拉聊天记录 |
 | **防闪烁** | 窗口采用 stage → reveal 两阶段显示；五子棋与每日一题刷新保留旧内容并稳定展示进度 |
 | **幂等迁移** | 数据库 SQL 使用条件式 DDL，支持安全重复执行 |
 

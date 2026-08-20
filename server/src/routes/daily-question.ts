@@ -2,8 +2,13 @@ import { Router } from "express";
 import type { Server } from "socket.io";
 import { z } from "zod";
 import type { ClientToServerEvents, DailyQuestionUpdatePayload, ServerToClientEvents } from "@xiaoelong/shared";
+import { env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
-import { DailyQuestionService, DailyQuestionValidationError } from "../services/daily-question-service.js";
+import {
+  DailyQuestionService,
+  DailyQuestionUnavailableError,
+  DailyQuestionValidationError
+} from "../services/daily-question-service.js";
 
 const submitAnswerSchema = z.object({
   questionId: z.coerce.number().int().positive(),
@@ -12,6 +17,11 @@ const submitAnswerSchema = z.object({
 
 const statsQuerySchema = z.object({
   questionId: z.coerce.number().int().positive()
+});
+
+const developmentPreviewSchema = z.object({
+  preferredSource: z.enum(["logiqa2", "cmmlu", "raven_style"]).optional(),
+  excludedBankQuestionIds: z.array(z.number().int().positive()).max(2000).default([])
 });
 
 export function createDailyQuestionRouter(
@@ -30,6 +40,40 @@ export function createDailyQuestionRouter(
       const payload = await service.getQuestionWithStatsForUser(req.user.id);
       res.json(payload);
     } catch (error) {
+      if (error instanceof DailyQuestionUnavailableError) {
+        res.status(503).json({ message: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/dev/next", requireAuth, async (req, res, next) => {
+    if (env.NODE_ENV !== "development") {
+      res.status(404).json({ message: "Not found." });
+      return;
+    }
+    if (!req.user) {
+      res.status(401).json({ message: "Unauthorized." });
+      return;
+    }
+
+    const parsed = developmentPreviewSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid question-bank preview request." });
+      return;
+    }
+
+    try {
+      res.json(await service.getNextDevelopmentPreview(
+        parsed.data.preferredSource,
+        parsed.data.excludedBankQuestionIds
+      ));
+    } catch (error) {
+      if (error instanceof DailyQuestionValidationError) {
+        res.status(404).json({ message: error.message });
+        return;
+      }
       next(error);
     }
   });

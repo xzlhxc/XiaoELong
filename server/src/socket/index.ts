@@ -17,6 +17,7 @@ import {
   normalizeChatContent,
   normalizeChatFile,
   normalizeChatImage,
+  normalizeChatMentions,
   normalizeReplyToMessageId
 } from "../utils/chat.js";
 import { verifyAccessToken } from "../utils/jwt.js";
@@ -168,8 +169,25 @@ export function setupSocket(
       }
 
       const file = normalizedFile?.file ?? null;
+      const normalizedMentions = normalizeChatMentions({
+        mentionAll: payload?.mentionAll,
+        mentionedUserIds: payload?.mentionedUserIds
+      });
+      if (!normalizedMentions.ok) {
+        ack?.({
+          ok: false,
+          error: normalizedMentions.error
+        });
+        return;
+      }
+
       const normalized = normalizeChatContent(payload?.content ?? "", {
-        allowEmpty: Boolean(image || file)
+        allowEmpty: Boolean(
+          image
+          || file
+          || normalizedMentions.mentionAll
+          || normalizedMentions.mentionedUserIds.length > 0
+        )
       });
       if (!normalized.ok) {
         ack?.({
@@ -189,6 +207,17 @@ export function setupSocket(
       }
 
       try {
+        if (normalizedMentions.mentionedUserIds.length > 0) {
+          const knownUserIds = new Set((await listUsers()).map((user) => user.id));
+          if (normalizedMentions.mentionedUserIds.some((mentionedUserId) => !knownUserIds.has(mentionedUserId))) {
+            ack?.({
+              ok: false,
+              error: "A mentioned user no longer exists."
+            });
+            return;
+          }
+        }
+
         if (
           normalizedReplyTo.replyToMessageId !== null
           && !await messageExists(normalizedReplyTo.replyToMessageId)
@@ -204,7 +233,9 @@ export function setupSocket(
           content: normalized.content,
           image,
           file,
-          replyToMessageId: normalizedReplyTo.replyToMessageId
+          replyToMessageId: normalizedReplyTo.replyToMessageId,
+          mentionAll: normalizedMentions.mentionAll,
+          mentionedUserIds: normalizedMentions.mentionedUserIds
         });
         io.to(MAIN_ROOM).emit("chat:message", message);
         ack?.({ ok: true });

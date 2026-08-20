@@ -1,4 +1,4 @@
-import type { DailyQuestion, DailyQuestionResult, DailyQuestionStats } from "@xiaoelong/shared";
+import type { DailyQuestion, DailyQuestionDevPreviewResponse, DailyQuestionResult, DailyQuestionStats } from "@xiaoelong/shared";
 import { env } from "../config/env.js";
 import {
   createDailyQuestion,
@@ -7,20 +7,19 @@ import {
   getDailyQuestionByDate,
   getDailyQuestionById,
   getDailyQuestionStats,
-  listRecentQuestionTexts,
   submitDailyAnswer,
   toPublicDailyQuestion
 } from "../db/daily-questions.js";
-import { getResetDayInTimezone } from "../utils/time.js";
 import {
-  createFallbackQuestionGeneratorProvider,
-  createQuestionGeneratorProvider
-} from "./question-generator/deepseek-provider.js";
-import type { QuestionGenerateOutput } from "./question-generator/provider.js";
+  getNextReadyQuestionBankItem,
+  getNextReadyQuestionBankPreviewItem
+} from "../db/question-bank.js";
+import { getResetDayInTimezone } from "../utils/time.js";
 
 const QUESTION_RESET_HOUR = 8;
 
 export class DailyQuestionValidationError extends Error {}
+export class DailyQuestionUnavailableError extends Error {}
 
 function buildQuestionResult(question: DailyQuestionRecord, answeredIndex: number): DailyQuestionResult | null {
   if (!question.hasAnswerKey) {
@@ -33,15 +32,6 @@ function buildQuestionResult(question: DailyQuestionRecord, answeredIndex: numbe
     isCorrect: answeredIndex === question.correctAnswerIndex,
     explanation: question.explanation
   };
-}
-
-function normalizeQuestion(question: string): string {
-  return question.replace(/\s+/g, "").trim();
-}
-
-function isRepeatedQuestion(question: string, recentQuestions: string[]): boolean {
-  const normalized = normalizeQuestion(question);
-  return recentQuestions.some((recent) => normalizeQuestion(recent) === normalized);
 }
 
 export class DailyQuestionService {
@@ -70,44 +60,24 @@ export class DailyQuestionService {
       return existing;
     }
 
-    const avoidQuestions = await listRecentQuestionTexts(date, 10);
-    let generated: QuestionGenerateOutput;
-    let sourceType: "online" | "fallback" = "online";
-    let sourceContext: string | null;
-
-    try {
-      const provider = createQuestionGeneratorProvider();
-      generated = await provider.generate({ date, avoidQuestions });
-      if (isRepeatedQuestion(generated.question, avoidQuestions)) {
-        throw new Error("Generated question repeated a recent question.");
-      }
-      sourceContext = generated.sourceContext;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "unknown";
-      console.error(
-        `[DailyQuestion] DeepSeek generation failed for ${date} (model: ${env.DEEPSEEK_MODEL}); using local fallback: ${reason}`
-      );
-      const fallbackProvider = createFallbackQuestionGeneratorProvider();
-      generated = await fallbackProvider.generate({ date, avoidQuestions });
-      sourceType = "fallback";
-      sourceContext = JSON.stringify({
-        provider: "local-fallback",
-        model: env.DEEPSEEK_MODEL,
-        reason
-      });
+    const bankItem = await getNextReadyQuestionBankItem(date);
+    if (!bankItem?.explanation) {
+      throw new DailyQuestionUnavailableError("题库中的未出题目已经用完，请补充并审核新题后再试。");
     }
 
     try {
       return await createDailyQuestion({
+        bankQuestionId: bankItem.id,
         date,
-        category: generated.category,
-        question: generated.question,
-        options: generated.options,
-        visual: generated.visual,
-        correctAnswerIndex: generated.correctAnswerIndex,
-        explanation: generated.explanation,
-        sourceType,
-        sourceContext
+        category: bankItem.category,
+        passage: bankItem.passage,
+        question: bankItem.question,
+        options: bankItem.options,
+        visual: bankItem.visual,
+        correctAnswerIndex: bankItem.correctAnswerIndex,
+        explanation: bankItem.explanation,
+        sourceType: "question_bank",
+        sourceContext: bankItem.sourceContext
       });
     } catch (error) {
       if ((error as { code?: string })?.code === "ER_DUP_ENTRY") {
@@ -181,5 +151,40 @@ export class DailyQuestionService {
       throw new DailyQuestionValidationError("Question not found.");
     }
     return getDailyQuestionStats(questionId, question.options.length);
+  }
+
+  async getNextDevelopmentPreview(
+    preferredSource: string | undefined,
+    excludedBankQuestionIds: number[]
+  ): Promise<DailyQuestionDevPreviewResponse> {
+    let item = await getNextReadyQuestionBankPreviewItem(preferredSource, excludedBankQuestionIds);
+    let resetSeen = false;
+    if (!item && excludedBankQuestionIds.length > 0) {
+      item = await getNextReadyQuestionBankPreviewItem(preferredSource, []);
+      resetSeen = true;
+    }
+    if (!item?.explanation) {
+      throw new DailyQuestionValidationError("No reviewed question-bank item is available.");
+    }
+
+    return {
+      bankQuestionId: item.id,
+      source: item.source,
+      resetSeen,
+      question: {
+        id: -item.id,
+        date: getResetDayInTimezone(new Date(), env.QUESTION_TIMEZONE, QUESTION_RESET_HOUR),
+        category: item.category,
+        passage: item.passage,
+        question: item.question,
+        options: item.options,
+        visual: item.visual,
+        sourceType: "question_bank",
+        sourceContext: item.sourceContext,
+        createdAt: new Date().toISOString()
+      },
+      correctAnswerIndex: item.correctAnswerIndex,
+      explanation: item.explanation
+    };
   }
 }

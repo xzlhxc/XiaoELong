@@ -48,6 +48,9 @@ export interface ChatMessageQuote {
 
 export interface ChatMessage extends ChatMessageQuote {
   replyTo: ChatMessageQuote | null;
+  /** Optional so a new client can still consume messages returned by an older server. */
+  mentionAll?: boolean;
+  mentionedUserIds?: string[];
 }
 
 export interface AuthJoinResponse {
@@ -148,16 +151,33 @@ export type DailyQuestionVisual =
         }>;
         unknownAngleAt?: string;
       };
+    }
+  | {
+      type: "matrixPattern";
+      data: {
+        cells: Array<MatrixPatternTile | null>;
+        choices: MatrixPatternTile[];
+      };
     };
+
+export interface MatrixPatternTile {
+  shape: "circle" | "triangle" | "square" | "diamond" | "pentagon" | "hexagon" | "arrow";
+  count: number;
+  rotation: number;
+  filled: boolean;
+  position: number;
+}
 
 export interface DailyQuestion {
   id: number;
   date: string;
   category: string;
+  /** Optional so new clients can still consume questions returned by an older server. */
+  passage?: string | null;
   question: string;
   options: string[];
   visual: DailyQuestionVisual | null;
-  sourceType: "online" | "fallback" | "manual";
+  sourceType: "question_bank" | "online" | "fallback" | "manual";
   sourceContext: string | null;
   createdAt: string;
 }
@@ -192,6 +212,16 @@ export interface DailyQuestionAnswerResponse {
   stats: DailyQuestionStats;
   answeredIndex: number;
   result: DailyQuestionResult | null;
+}
+
+/** Development-only preview payload used to browse reviewed question-bank items. */
+export interface DailyQuestionDevPreviewResponse {
+  bankQuestionId: number;
+  source: string;
+  resetSeen?: boolean;
+  question: DailyQuestion;
+  correctAnswerIndex: number;
+  explanation: string;
 }
 
 export interface DailyMoodTodayResponse {
@@ -331,6 +361,8 @@ export interface ChatSendPayload {
   image?: ChatImage | null;
   file?: ChatFile | null;
   replyToMessageId?: number | null;
+  mentionAll?: boolean;
+  mentionedUserIds?: string[];
 }
 
 export interface ChatSendAck {

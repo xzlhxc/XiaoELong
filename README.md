@@ -4,17 +4,17 @@
 
 小鳄龙是一个给固定小群使用的 Windows/macOS 桌面伴侣。它用 Electron 提供桌面悬浮入口，React/Vite 渲染界面，Express + Socket.io 提供前后端连接。后端采用 MySQL 持久化数据。目前主要功能包括：聊天室、每日问题、每日心情、膜拜、五子棋等。
 
-当前版本：`2.1.2`
+当前版本：`2.2.0`
 
-## 2.1.2 更新要点
+## 2.2.0 更新要点
 
-- 设置新增独立“外观”面板，可在五套配色、原始/郭之两种布局，以及原始形象、动态交互、静态展示之间切换；资料头像改为直接点击更换。
-- 郭之布局使用紧凑的左侧图标导航；配色、布局和形象选择区均支持滚动，形象页提供左右切换与实时预览。
-- 聊天启动时仍只加载最近 50 条记录，滚动到顶部后会按消息 ID 继续加载更早记录，直到显示全部历史；补拉期间保留滚动锚点和现有消息。
-- 修复按下 Shift 后桌宠与五子棋棋盘出现系统焦点框的问题；方向键操作棋盘时仍保留明确的键盘落点提示。
-- 五子棋邀请操作、执黑白信息和撤回入口改为固定操作槽，按钮显隐不再推动棋盘；胜利时棋盘本体继续保持固定。
-- 聊天记录区底部留白调整为 7px，最后一条消息与输入区不再拥挤。
-- 本版没有新增依赖或数据库结构变更；服务器需要更新以提供完整历史分页，从 `2.1.1` 升级可跳过 `npm install` 和 `db:init`。
+- 更新后首次打开面板会展示本版本公告；设置中的“版本公告”可倒序查看全部历史更新。
+- 聊天支持 `@所有人` 和 `@指定成员`，可仅发送提及而不填写正文；被提及者可从右上角提醒逐条跳转到对应消息。
+- 聊天按账号记录最后已读位置，重启后仍默认显示最新消息，并可返回离线期间的第一条新消息。
+- 收到尚未阅读的新消息时，任务栏托盘图标会闪烁；阅读或主动跳转到新消息后停止。
+- 每日一题改为从 LogiQA 2.0、CMMLU 与程序化图形推理题库均衡抽取；DeepSeek 只在维护阶段复核文本题答案并生成入库解析。
+- 正式版每日题按内容永久排除历史已出题目，未出题库耗尽时明确提示补充题库，不会重复旧题。
+- `messages` 表新增提及字段，从旧版升级需要执行 `db:init` 后再启动新版服务端。
 
 （详细见 [版本历史](CHANGELOG.md) ）
 
@@ -24,6 +24,7 @@
 - [架构文档](docs/architecture.md) — 系统架构、数据流、通信协议
 - [文件清单](docs/file-inventory.md) — 全量文件用途说明
 - [服务器部署说明](deploy/server/README-SERVER.md) — 宝塔 Windows 面板部署与更新
+- [每日一题题库来源](docs/question-bank-sources.md) — 数据集版本、许可和使用边界
 - [版本历史](CHANGELOG.md) — 各版本更新记录
 
 ## 技术栈
@@ -140,7 +141,33 @@ npm.cmd run dev:desktop
 
 开发版使用独立的 `XiaoELong-dev` 用户数据目录，不会覆盖正式版登录信息，也不会修改正式版的开机自启动设置。
 
-## DeepSeek 诊断（每日一题）
+## 每日一题题库准备
+
+先初始化数据库，再导入固定版本的 LogiQA 2.0、CMMLU 与项目内程序化图形题库：
+
+```powershell
+npm.cmd run db:init
+npm.cmd run question-bank:import
+```
+
+导入只保存题干、选项和标准答案。使用 DeepSeek 分批复核并生成解析后，题目才会进入每日抽取范围；默认每次处理 20 道，可显式指定数量：
+
+```powershell
+npm.cmd run question-bank:explain -- --limit=100
+```
+
+也可只处理一个来源：
+
+```powershell
+npm.cmd run question-bank:import -- --source=logiqa2
+npm.cmd run question-bank:explain -- --source=logiqa2 --limit=100
+```
+
+可用题源为 `logiqa2`、`cmmlu` 和 `raven_style`。`raven_style` 会直接生成带 SVG 图形和确定性解析的图形推理题，不需要调用 DeepSeek。
+
+题目本身不会由 DeepSeek 生成。解析审核认为答案不唯一、题目过时或标准答案可疑时，该题会被停用。题库许可和固定版本见 [每日一题题库来源](docs/question-bank-sources.md)。
+
+## DeepSeek 诊断（题库解析）
 
 配置好 `server/.env` 并完成构建后，可以执行一次不会写入数据库的 DeepSeek 诊断：
 
@@ -148,14 +175,14 @@ npm.cmd run dev:desktop
 npm.cmd run deepseek:check
 ```
 
-诊断会先验证 `/models` 鉴权与配置模型是否可用，再真实生成一道题并执行结构校验。成功时会显示：
+诊断会先验证 `/models` 鉴权与配置模型是否可用，再为一道固定样题生成解析并执行结构校验。成功时会显示：
 
 ```text
 [DeepSeekCheck] Authentication succeeded.
-[DeepSeekCheck] Generated question passed schema validation.
+[DeepSeekCheck] Explanation review passed schema validation.
 ```
 
-诊断和服务日志不会输出 API Key。每日题首次生成失败后会保存当天的本地备用题；当天不会自动替换，DeepSeek 恢复后从下一道新题开始生效。
+诊断和服务日志不会输出 API Key。每日抽题本身不调用 DeepSeek，并会按题目内容指纹永久排除已经作为每日题出现过的内容；未出且已解析的题目耗尽时接口会明确提示补充题库，不会重复旧题或临时生成备用题。
 
 ## 构建与清理
 
@@ -191,7 +218,7 @@ npm.cmd run build:cloud
 npm.cmd run server:deploy
 ```
 
-该命令会先定向清理 `server/dist` 和 `shared/dist`，重新构建后生成 `deploy/XiaoELong-server-2.1.2.zip`。Windows 使用系统自带的 PowerShell/.NET 压缩，无需额外安装 `zip`；macOS/Linux 需要系统提供 `zip` 命令。脚本会先生成同目录临时 ZIP，成功后才替换正式包，失败时保留上一份正式包。
+该命令会先定向清理 `server/dist` 和 `shared/dist`，重新构建后生成 `deploy/XiaoELong-server-2.2.0.zip`。Windows 使用系统自带的 PowerShell/.NET 压缩，无需额外安装 `zip`；macOS/Linux 需要系统提供 `zip` 命令。脚本会先生成同目录临时 ZIP，成功后才替换正式包，失败时保留上一份正式包。
 
 生成 Electron unpacked 目录包，适合本机快速测试：
 
@@ -213,7 +240,7 @@ npm.cmd run electron:dist
 npm run electron:dist:mac
 ```
 
-该命令会在 `release/` 下生成 `XiaoELong-2.1.2-mac-universal.dmg`、`XiaoELong-2.1.2-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.1.2-mac-universal` 的 Actions 产物。
+该命令会在 `release/` 下生成 `XiaoELong-2.2.0-mac-universal.dmg`、`XiaoELong-2.2.0-mac-universal.zip`、`latest-mac.yml` 和 `latest-mac.json`。仓库中的 `Build macOS universal` GitHub Actions 工作流固定使用 Node.js `22.23.1`，可手动触发；工作流会从根 `package.json` 读取版本号，验证 App 同时包含 `x86_64` 和 `arm64`，核对版本、文件名、DMG 大小与 SHA-256，并上传名为 `XiaoELong-2.2.0-mac-universal` 的 Actions 产物。
 
 下载并解压 Actions 产物后，可在 macOS 终端校验安装包：
 
@@ -235,7 +262,7 @@ xattr -dr com.apple.quarantine /Applications/XiaoELong.app
 - 浏览器下载完成后，完全退出旧版 XiaoELong，打开 DMG，将应用拖入“应用程序”并选择替换，再重新打开。登录信息和本机设置保存在用户数据目录中，正常覆盖应用不会清除它们。
 - 这是“检查版本 + 打开可信下载链接”，不是静默自动安装；未签名应用若要使用 Electron 的完整自动更新，仍需 Apple Developer 证书、签名和公证。
 - 已经发出的 `1.3.1` 不包含检查逻辑，必须手动安装一次 `1.3.2` 或更新版本；从 `1.3.2` 开始才会提示后续版本。
-- 发布时将 DMG 上传到标签为 `v2.1.2` 的 GitHub Release，再把 Actions 生成的 `latest-mac.json` 上传到服务器更新目录。不要上传 `latest-mac.yml`，它不用于当前的 Mac 手动更新流程。
+- 发布时将 DMG 上传到标签为 `v2.2.0` 的 GitHub Release，再把 Actions 生成的 `latest-mac.json` 上传到服务器更新目录。不要上传 `latest-mac.yml`，它不用于当前的 Mac 手动更新流程。
 - Windows 自动更新不受影响。若用户网络无法访问 GitHub，仍可直接向其发送 DMG。
 
 `build` 会先运行 `clean`，避免旧的 `dist` 文件混入发布产物。
@@ -247,7 +274,7 @@ xattr -dr com.apple.quarantine /Applications/XiaoELong.app
 - 在线状态：Socket 握手校验 token，服务端维护多窗口在线状态。
 - 实时聊天：文字、图片和普通文件附件，启动时加载最近 50 条记录，滚到顶部可继续查看全部更早记录；支持右键引用消息、引用预览与跳转原消息。
 - 每日心情：每日选择一次心情，在线成员实时同步。
-- 每日问题：每天一道大学生向四选一题，支持 DeepSeek 生成、本地 fallback、逻辑/语文常识权重控制和结构化附图模板；手动刷新保留当前题目并显示稳定的刷新状态。
+- 每日问题：每天从已复核且已有解析、且从未作为每日题出现过的公考题库内容中抽取一道四选一题，支持长材料、来源署名和结构化附图；题库耗尽时明确提示补充题目，手动刷新保留当前题目并显示稳定的刷新状态。
 - 五子棋：邀请、接受、落子、胜负判定、实时更新和受服务端约束的单步撤回；刷新对局时保留现有列表与棋盘。
 - 桌面壳：悬浮 Avatar、独立面板、设置、开机自启、图片查看器。
 

@@ -6,6 +6,9 @@ import type { DailyQuestionTodayResponse } from "@xiaoelong/shared";
 import { useDaily, type DailyContextValue } from "../../contexts/DailyContext";
 import { DailyQuestionPanel } from "./DailyQuestionPanel";
 
+vi.mock("../../contexts/AuthContext", () => ({
+  useAuth: () => ({ token: "test-token" })
+}));
 vi.mock("../../contexts/DailyContext", () => ({ useDaily: vi.fn() }));
 vi.mock("../atoms/UserAvatar", () => ({
   UserAvatar: () => <span data-testid="user-avatar" />
@@ -58,7 +61,7 @@ afterEach(() => {
 });
 
 describe("DailyQuestionPanel 刷新状态", () => {
-  it("刷新时保留已有题目，并在刷新按钮左侧显示状态", () => {
+  it("刷新时保留已有题目，并在开发版操作按钮左侧显示状态", () => {
     mockDaily({ dailyLoading: true });
     const { container } = render(<DailyQuestionPanel />);
 
@@ -68,7 +71,8 @@ describe("DailyQuestionPanel 刷新状态", () => {
 
     const actions = container.querySelector(".daily-actions");
     expect(actions?.children[0].classList.contains("module-refresh-status")).toBe(true);
-    expect(actions?.children[1].textContent).toBe("刷新");
+    expect(actions?.children[1].textContent).toBe("下一题");
+    expect(actions?.children[2].textContent).toBe("刷新");
   });
 
   it("初次加载无数据时仍保留标题、状态和刷新按钮的位置", () => {

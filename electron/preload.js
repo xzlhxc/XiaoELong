@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("xiaoelongDesktop", {
   hideAllWindows: () => ipcRenderer.send("desktop:hide-all-windows"),
   setMoodPromptVisible: (visible) => ipcRenderer.send("desktop:mood-prompt-visible", visible),
   setAvatarClickThrough: (enabled) => ipcRenderer.send("desktop:avatar-click-through", enabled),
+  setTrayUnread: (active) => ipcRenderer.send("desktop:tray-unread:set", active),
   openImageViewer: (payload) => ipcRenderer.send("desktop:image-viewer-open", payload),
   requestLogout: () => ipcRenderer.send("desktop:logout"),
   getSettings: () => ipcRenderer.invoke("desktop:settings:get"),

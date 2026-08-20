@@ -1,6 +1,6 @@
 {
   "name": "xiaoelong-server",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "db:init": "tsx src/db/init.ts",
-    "deepseek:check": "node dist/scripts/deepseek-check.js"
+    "deepseek:check": "node dist/scripts/deepseek-check.js",
+    "question-bank:import": "node dist/scripts/question-bank-import.js",
+    "question-bank:explain": "node dist/scripts/question-bank-explain.js"
   },
   "dependencies": {
     "@xiaoelong/shared": "file:../shared",

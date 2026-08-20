@@ -1,6 +1,6 @@
 # XiaoELong 项目文件清单
 
-> 更新日期：2026-08-17 | 版本：2.1.2
+> 更新日期：2026-08-20 | 版本：2.2.0
 
 本文档列出项目所有文件和目录的用途，并标识可删除/优化的文件。
 
@@ -143,7 +143,7 @@ XiaoELong/
 |------|------|------|
 | `client/src/components/pages/AuthPage.tsx` | ~32 | 登录页（未登录角色） |
 | `client/src/components/pages/PanelPage.tsx` | ~37 | 主面板页 |
-| `client/src/components/pages/PanelContent.tsx` | ~460 | 主面板内容：tab 切换、原始/郭之布局、外观配色/布局/形象设置与各 panel 组装 |
+| `client/src/components/pages/PanelContent.tsx` | ~530 | 主面板内容：tab 切换、布局与外观设置、版本公告入口及各 panel 组装 |
 | `client/src/components/pages/AvatarPage.tsx` | ~20 | 悬浮桌宠页 |
 | `client/src/components/pages/SinglePage.tsx` | ~15 | 单窗口页 |
 | `client/src/components/pages/DivinePage.tsx` | ~13 | 全屏神选页 |
@@ -153,10 +153,11 @@ XiaoELong/
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `client/src/components/panels/ChatPanel.tsx` | ~1150 | 聊天面板：消息列表、滚顶加载更早记录、文字输入、图片/文件上传、右键引用、未读与滚动锚点 |
+| `client/src/components/panels/ChatPanel.tsx` | ~1450 | 聊天面板：消息列表、历史分页、附件、引用、@提及、未读提醒与滚动锚点 |
+| `client/src/components/panels/ReleaseAnnouncementDialog.tsx` | ~60 | 当前版本与历史版本公告的通用滚动弹窗 |
 | `client/src/components/panels/DivineSelectionPanel.tsx` | ~461 | 神选膜拜面板：七位神明卡片、段位展示、膜拜按钮 |
 | `client/src/components/panels/GomokuPanel.tsx` | ~452 | 五子棋面板：对局列表、棋盘渲染、落子/撤回交互、邀请选择及刷新状态 |
-| `client/src/components/panels/DailyQuestionPanel.tsx` | ~389 | 每日一题面板：题目展示（含可视化附图）、四选一、统计柱状图、答案揭晓及保留内容的刷新状态 |
+| `client/src/components/panels/DailyQuestionPanel.tsx` | ~400 | 每日一题面板：长材料与题目来源展示、可视化附图、四选一、统计、答案解析及保留内容的刷新状态 |
 | `client/src/components/panels/AvatarDock.tsx` | ~363 | 悬浮桌宠容器：拖拽入口、形象展示、面板开关、心情快捷选择 |
 | `client/src/components/panels/StatusBar.tsx` | ~192 | 在线状态栏：在线用户列表 + 每日心情选择器 |
 | `client/src/components/panels/SettingsProfileForm.tsx` | ~110 | 设置/个人资料表单：昵称、可点击更换的头像与账户注销 |
@@ -168,6 +169,12 @@ XiaoELong/
 |------|------|
 | `client/src/styles/styles.css` | 全局样式：布局、配色、聊天、面板、状态栏等 |
 | `client/src/styles/divine-constellation.css` | 神选星座主题视觉样式 |
+
+### 数据（data/）
+
+| 文件 | 作用 |
+|------|------|
+| `client/src/data/release-announcements.ts` | 版本公告结构与 1.3.0 起的历史更新内容 |
 
 ### 测试（与源码同目录 co-located）
 
@@ -232,10 +239,10 @@ XiaoELong/
 | 文件 | 行数 | 作用 |
 |------|------|------|
 | `server/src/services/gomoku-service.ts` | ~491 | **五子棋核心**：创建对局、接受/拒绝、落子、最后一手撤回、防链式撤回、胜负判定及事务并发控制 |
-| `server/src/services/daily-question-service.ts` | ~200 | 每日一题服务：同日期 single-flight 合并并发生成、重复键回读权威记录、在线/备用题落库、今日题目与统计、答题提交 |
-| `server/src/services/question-generator/provider.ts` | ~15 | 题目生成器接口定义（策略模式） |
-| `server/src/services/question-generator/deepseek-provider.ts` | ~330 | DeepSeek AI 生成器：严格 JSON Output、附图 schema 校验、带错误反馈的重试与无附图收尾 |
-| `server/src/services/question-generator/mock-provider.ts` | ~30 | Mock 生成器：测试用，返回固定题目 |
+| `server/src/services/daily-question-service.ts` | ~180 | 每日一题服务：同日期 single-flight、历史内容硬性去重、已解析题库抽取、题库耗尽提示、今日题目与统计、答题提交 |
+| `server/src/services/question-bank-sources.ts` | ~250 | 固定版本 LogiQA 2.0/CMMLU 下载、解析、过滤及程序化图形题接入 |
+| `server/src/services/visual-question-bank.ts` | ~250 | 生成带确定性答案和解析的 RAVEN 风格 SVG 图形推理题 |
+| `server/src/services/question-bank-explanation.ts` | ~150 | DeepSeek 独立复核标准答案并生成解析；疑问题返回停用结论 |
 
 ### 数据访问层（DB）
 
@@ -243,10 +250,11 @@ XiaoELong/
 |------|------|------|
 | `server/src/db/pool.ts` | ~15 | MySQL 连接池创建（mysql2/promise，connectionLimit=10） |
 | `server/src/db/init.ts` | ~40 | 数据库初始化脚本：读取 init.sql、连接数据库、执行 SQL |
-| `server/src/db/init.sql` | ~302 | **数据库 DDL + 渐进式迁移**：创建 7 张表并通过条件式 ALTER 幂等补列；V2.1.1 新增 `gomoku_games.last_undone_move_no` |
+| `server/src/db/init.sql` | ~390 | **数据库 DDL + 渐进式迁移**：新增固定题库及每日题目材料/关联字段，并保留其他表的幂等迁移 |
 | `server/src/db/users.ts` | ~100 | 用户 CRUD：创建（UUID v4）、按 ID 查询、按昵称查询、更新资料、删除（级联） |
 | `server/src/db/messages.ts` | ~130 | 消息存取：插入消息（含图片/文件元数据）、按消息 ID 游标分页查询历史 |
 | `server/src/db/daily-questions.ts` | ~80 | 每日一题存取：按日期查询题目、插入题目、查询答案、插入答案、统计 |
+| `server/src/db/question-bank.ts` | ~190 | 题库批量导入、解析保存、疑问题停用及按使用历史抽取 |
 | `server/src/db/daily-moods.ts` | ~50 | 每日心情存取：按日期查询、插入/更新心情 |
 | `server/src/db/deity-worships.ts` | ~60 | 神选膜拜存取：按日期查询膜拜记录、插入膜拜、统计各神祇膜拜数 |
 | `server/src/db/mappers.ts` | ~40 | 数据库行 → 类型对象映射函数 |
@@ -270,7 +278,7 @@ XiaoELong/
 
 | 文件 | 作用 |
 |------|------|
-| `server/src/jobs/question-scheduler.ts` | 每日题目定时生成：node-cron 按 QUESTION_CRON 调度，每天调用 DeepSeek API 生成新题 |
+| `server/src/jobs/question-scheduler.ts` | 每日题目定时抽取：node-cron 按 QUESTION_CRON 调度，从已解析题库选题 |
 
 ### 类型
 
@@ -282,7 +290,9 @@ XiaoELong/
 
 | 文件 | 作用 |
 |------|------|
-| `server/src/scripts/deepseek-check.ts` | DeepSeek API 连通性诊断：验证鉴权、检查模型列表、生成一道测试题并校验结构（不写入数据库） |
+| `server/src/scripts/deepseek-check.ts` | DeepSeek API 连通性诊断：验证鉴权、检查模型列表并生成固定样题解析（不写入数据库） |
+| `server/src/scripts/question-bank-import.ts` | 导入固定提交的文本题库和程序化图形题，并分批幂等写入数据库 |
+| `server/src/scripts/question-bank-explain.ts` | 分批复核待处理题目，将解析写入数据库或停用疑问题 |
 
 ### 上传目录
 

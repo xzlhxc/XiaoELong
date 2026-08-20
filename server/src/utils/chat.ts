@@ -37,6 +37,10 @@ const chatFileSchema = z.object({
     .positive()
     .max(env.MAX_CHAT_FILE_SIZE_MB * 1024 * 1024)
 });
+const chatMentionsSchema = z.object({
+  mentionAll: z.boolean().optional().default(false),
+  mentionedUserIds: z.array(z.string().trim().min(1).max(36)).max(100).optional().default([])
+});
 
 export interface NormalizedMessage {
   ok: true;
@@ -52,6 +56,10 @@ export type MessageValidationResult = NormalizedMessage | InvalidMessage;
 
 export type ReplyToMessageIdValidationResult =
   | { ok: true; replyToMessageId: number | null }
+  | InvalidMessage;
+
+export type ChatMentionsValidationResult =
+  | { ok: true; mentionAll: boolean; mentionedUserIds: string[] }
   | InvalidMessage;
 
 export function isAllowedChatImageMimeType(value: string): boolean {
@@ -115,6 +123,22 @@ export function normalizeReplyToMessageId(input: unknown): ReplyToMessageIdValid
   return {
     ok: true,
     replyToMessageId: input
+  };
+}
+
+export function normalizeChatMentions(input: unknown): ChatMentionsValidationResult {
+  const parsed = chatMentionsSchema.safeParse(input ?? {});
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Invalid chat mentions."
+    };
+  }
+
+  return {
+    ok: true,
+    mentionAll: parsed.data.mentionAll,
+    mentionedUserIds: parsed.data.mentionAll ? [] : Array.from(new Set(parsed.data.mentionedUserIds))
   };
 }
 

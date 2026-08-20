@@ -1,6 +1,6 @@
 {
   "name": "xiaoelong-server-deploy",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "private": true,
   "engines": {
     "node": ">=22.22.2 <23"
@@ -12,6 +12,8 @@
   "scripts": {
     "db:init": "cd server && node dist/db/init.js",
     "deepseek:check": "cd server && node dist/scripts/deepseek-check.js",
+    "question-bank:import": "cd server && node dist/scripts/question-bank-import.js",
+    "question-bank:explain": "cd server && node dist/scripts/question-bank-explain.js",
     "start": "cd server && node dist/index.js"
   }
 }

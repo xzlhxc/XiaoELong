@@ -22,6 +22,65 @@ const ALLOWED_CHAT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "imag
 const MAX_CHAT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_CHAT_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const BLOCKED_CHAT_FILE_EXTENSIONS = [".exe", ".bat", ".cmd", ".msi", ".ps1", ".js", ".vbs", ".scr", ".com"];
+const CHAT_LAST_READ_MESSAGE_STORAGE_PREFIX = "xiaoelong_chat_last_read_message_";
+const CHAT_MENTION_ACK_STORAGE_PREFIX = "xiaoelong_chat_mention_ack_";
+
+function getLastReadMessageStorageKey(userId: string): string {
+  return `${CHAT_LAST_READ_MESSAGE_STORAGE_PREFIX}${userId}`;
+}
+
+function readLastReadMessageId(userId: string | null): number | null {
+  if (!userId) {
+    return null;
+  }
+  try {
+    const value = Number(localStorage.getItem(getLastReadMessageStorageKey(userId)));
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistLastReadMessageId(userId: string | null, messageId: number): void {
+  if (!userId) {
+    return;
+  }
+  try {
+    const previousMessageId = readLastReadMessageId(userId) ?? 0;
+    if (messageId > previousMessageId) {
+      localStorage.setItem(getLastReadMessageStorageKey(userId), String(messageId));
+    }
+  } catch {
+    // 本地存储不可用时仍允许正常使用聊天，只是不保留跨重启的已读位置。
+  }
+}
+
+function readMentionAckMessageId(userId: string | null): number | null {
+  if (!userId) {
+    return null;
+  }
+  try {
+    const storedValue = localStorage.getItem(`${CHAT_MENTION_ACK_STORAGE_PREFIX}${userId}`);
+    if (storedValue === null) {
+      return null;
+    }
+    const value = Number(storedValue);
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistMentionAckMessageId(userId: string | null, messageId: number): void {
+  if (!userId) {
+    return;
+  }
+  try {
+    localStorage.setItem(`${CHAT_MENTION_ACK_STORAGE_PREFIX}${userId}`, String(messageId));
+  } catch {
+    // 本地存储不可用时，提及提醒仍在当前挂载期间正常工作。
+  }
+}
 
 function getExtensionForImageType(type: string): string {
   if (type === "image/jpeg") {
@@ -129,7 +188,9 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const { currentUserId } = useAuth();
   const {
     messages,
+    presenceUsers,
     sendError,
+    historyInitialized,
     hasOlderMessages,
     loadingOlderMessages,
     olderMessagesError,
@@ -146,9 +207,13 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const [sending, setSending] = useState(false);
   const [dragDepth, setDragDepth] = useState(0);
   const [hiddenUnreadCount, setHiddenUnreadCount] = useState(0);
+  const [startupUnreadCount, setStartupUnreadCount] = useState(0);
   const [liveNewMessageCount, setLiveNewMessageCount] = useState(0);
   const [replyToMessageId, setReplyToMessageId] = useState<number | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
+  const [mentionAll, setMentionAll] = useState(false);
+  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composeInputRef = useRef<HTMLInputElement | null>(null);
@@ -156,6 +221,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const isAtBottomRef = useRef(true);
   const lastMessageIdRef = useRef<number | null>(null);
   const firstUnreadMessageIdRef = useRef<number | null>(null);
+  const firstStartupUnreadMessageIdRef = useRef<number | null>(null);
   const unreadCountRef = useRef(0);
   const firstLiveNewMessageIdRef = useRef<number | null>(null);
   const liveNewMessageCountRef = useRef(0);
@@ -164,9 +230,18 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   const restoreFrameRef = useRef<number | null>(null);
   const startupFrameRef = useRef<number | null>(null);
   const coldStartScrollRef = useRef(scrollMemoryRef.current === null);
+  const startupLastReadMessageIdRef = useRef(
+    scrollMemoryRef.current === null ? readLastReadMessageId(currentUserId) : null
+  );
+  const startupLatestMessageIdRef = useRef<number | null>(null);
   const startupBaselineInitializedRef = useRef(false);
   const startupBottomPendingRef = useRef(scrollMemoryRef.current === null);
   const olderHistoryAnchorRef = useRef<{ messageId: number; offset: number } | null>(null);
+  const storedMentionAckMessageIdRef = useRef(
+    readMentionAckMessageId(currentUserId) ?? readLastReadMessageId(currentUserId)
+  );
+  const mentionAckInitializedRef = useRef(storedMentionAckMessageIdRef.current !== null);
+  const [mentionAckMessageId, setMentionAckMessageId] = useState(storedMentionAckMessageIdRef.current);
   const panelVisibleRef = useRef(
     window.xiaoelongDesktop?.role === "panel"
       ? (window.xiaoelongDesktop.getPanelVisibility?.() ?? document.visibilityState === "visible")
@@ -174,6 +249,26 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   );
 
   const renderedMessages = useMemo(() => messages, [messages]);
+  const mentionableUsers = useMemo(
+    () => presenceUsers.filter((user) => user.id !== currentUserId),
+    [presenceUsers, currentUserId]
+  );
+  const mentionedUsers = useMemo(
+    () => mentionedUserIds
+      .map((userId) => presenceUsers.find((user) => user.id === userId))
+      .filter((user): user is NonNullable<typeof user> => Boolean(user)),
+    [mentionedUserIds, presenceUsers]
+  );
+  const pendingMentionMessages = useMemo(
+    () => mentionAckMessageId === null || !currentUserId
+      ? []
+      : renderedMessages.filter((message) =>
+          message.id > mentionAckMessageId
+          && message.user.id !== currentUserId
+          && (Boolean(message.mentionAll) || Boolean(message.mentionedUserIds?.includes(currentUserId)))
+        ),
+    [renderedMessages, mentionAckMessageId, currentUserId]
+  );
   const replyToMessage = useMemo(
     () => renderedMessages.find((message) => message.id === replyToMessageId) ?? null,
     [renderedMessages, replyToMessageId]
@@ -203,6 +298,16 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     [renderedMessages]
   );
   const activeImage = viewerIndex === null ? null : imageMessages[viewerIndex] ?? null;
+
+  useEffect(() => {
+    if (mentionAckInitializedRef.current || !historyInitialized) {
+      return;
+    }
+    mentionAckInitializedRef.current = true;
+    const baselineMessageId = renderedMessages[renderedMessages.length - 1]?.id ?? 0;
+    persistMentionAckMessageId(currentUserId, baselineMessageId);
+    setMentionAckMessageId(baselineMessageId);
+  }, [historyInitialized, renderedMessages, currentUserId]);
 
   useEffect(() => {
     if (!imageFile) {
@@ -254,6 +359,17 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     firstLiveNewMessageIdRef.current = normalizedCount > 0 ? firstMessageId : null;
     liveNewMessageCountRef.current = normalizedCount;
     setLiveNewMessageCount(normalizedCount);
+  }
+
+  function markLatestMessageRead(): void {
+    if (!panelVisibleRef.current) {
+      return;
+    }
+    const latestMessage = renderedMessagesRef.current[renderedMessagesRef.current.length - 1];
+    if (latestMessage) {
+      persistLastReadMessageId(currentUserId, latestMessage.id);
+      window.xiaoelongDesktop?.setTrayUnread?.(false);
+    }
   }
 
   function captureScrollMemory(): void {
@@ -322,6 +438,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     isAtBottomRef.current = true;
     setHiddenUnreadState(null, 0);
     setLiveNewMessageState(null, 0);
+    markLatestMessageRead();
   }
 
   function scheduleStartupScrollToBottom(): void {
@@ -361,6 +478,46 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
       behavior: "smooth"
     });
     setHiddenUnreadState(null, 0);
+    window.xiaoelongDesktop?.setTrayUnread?.(false);
+    window.requestAnimationFrame(captureScrollMemory);
+  }
+
+  function scrollToFirstStartupUnread(): void {
+    const list = listRef.current;
+    const firstUnreadMessageId = firstStartupUnreadMessageIdRef.current;
+    if (!list || firstUnreadMessageId === null) {
+      return;
+    }
+
+    const lastReadMessageId = startupLastReadMessageIdRef.current;
+    const oldestMessageId = renderedMessagesRef.current[0]?.id ?? null;
+    const isStillLocatingFirstUnread = lastReadMessageId !== null
+      && oldestMessageId !== null
+      && oldestMessageId > lastReadMessageId
+      && hasOlderMessages;
+    if (isStillLocatingFirstUnread) {
+      if (!loadingOlderMessages) {
+        void loadOlderMessages();
+      }
+      return;
+    }
+
+    isScrollingToBottomRef.current = false;
+    const firstUnreadElement = getMessageElement(firstUnreadMessageId);
+    if (!firstUnreadElement) {
+      return;
+    }
+
+    const listBounds = list.getBoundingClientRect();
+    const targetTop = list.scrollTop + firstUnreadElement.getBoundingClientRect().top - listBounds.top - 8;
+    list.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: "smooth"
+    });
+    firstStartupUnreadMessageIdRef.current = null;
+    startupLastReadMessageIdRef.current = null;
+    setStartupUnreadCount(0);
+    window.xiaoelongDesktop?.setTrayUnread?.(false);
     window.requestAnimationFrame(captureScrollMemory);
   }
 
@@ -385,6 +542,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
       behavior: "smooth"
     });
     setLiveNewMessageState(null, 0);
+    window.xiaoelongDesktop?.setTrayUnread?.(false);
     window.requestAnimationFrame(captureScrollMemory);
   }
 
@@ -393,6 +551,29 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     window.requestAnimationFrame(() => {
       composeInputRef.current?.focus({ preventScroll: true });
     });
+  }
+
+  function toggleMentionAll(): void {
+    setMentionAll((selected) => !selected);
+    setMentionedUserIds([]);
+  }
+
+  function toggleMentionUser(userId: string): void {
+    setMentionAll(false);
+    setMentionedUserIds((current) => current.includes(userId)
+      ? current.filter((mentionedUserId) => mentionedUserId !== userId)
+      : [...current, userId]);
+  }
+
+  function scrollToNextMention(): void {
+    const message = pendingMentionMessages[0];
+    if (!message) {
+      return;
+    }
+    scrollToQuotedMessage(message.id);
+    persistMentionAckMessageId(currentUserId, message.id);
+    setMentionAckMessageId(message.id);
+    window.xiaoelongDesktop?.setTrayUnread?.(false);
   }
 
   function scrollToQuotedMessage(messageId: number): void {
@@ -464,6 +645,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     if (isAtBottom) {
       setHiddenUnreadState(null, 0);
       setLiveNewMessageState(null, 0);
+      markLatestMessageRead();
     }
     captureScrollMemory();
   }
@@ -595,6 +777,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
 
     if (coldStartScrollRef.current && !startupBaselineInitializedRef.current && latestMessage) {
       startupBaselineInitializedRef.current = true;
+      startupLatestMessageIdRef.current = latestMessage.id;
       hasRestoredScrollRef.current = true;
       lastMessageIdRef.current = latestMessage.id;
       setHiddenUnreadState(null, 0);
@@ -735,6 +918,47 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   }, [renderedMessages, currentUserId, scrollMemoryRef]);
 
   useEffect(() => {
+    const lastReadMessageId = startupLastReadMessageIdRef.current;
+    const latestMessageIdAtStartup = startupLatestMessageIdRef.current;
+    if (
+      lastReadMessageId === null
+      || latestMessageIdAtStartup === null
+      || latestMessageIdAtStartup <= lastReadMessageId
+      || renderedMessages.length === 0
+    ) {
+      firstStartupUnreadMessageIdRef.current = null;
+      setStartupUnreadCount(0);
+      return;
+    }
+
+    const startupUnreadMessages = renderedMessages.filter(
+      (message) => message.id > lastReadMessageId
+        && message.id <= latestMessageIdAtStartup
+        && message.user.id !== currentUserId
+    );
+    firstStartupUnreadMessageIdRef.current = startupUnreadMessages[0]?.id ?? null;
+    setStartupUnreadCount(startupUnreadMessages.length);
+    if (startupUnreadMessages.length > 0 && !panelVisibleRef.current) {
+      window.xiaoelongDesktop?.setTrayUnread?.(true);
+    }
+
+    const oldestMessageId = renderedMessages[0]?.id ?? null;
+    const boundaryNeedsOlderMessages = oldestMessageId !== null
+      && oldestMessageId > lastReadMessageId
+      && hasOlderMessages;
+    if (boundaryNeedsOlderMessages && !loadingOlderMessages && !olderMessagesError) {
+      void loadOlderMessages();
+    }
+  }, [
+    renderedMessages,
+    currentUserId,
+    hasOlderMessages,
+    loadingOlderMessages,
+    olderMessagesError,
+    loadOlderMessages
+  ]);
+
+  useEffect(() => {
     if (!loadingOlderMessages) {
       olderHistoryAnchorRef.current = null;
     }
@@ -840,9 +1064,12 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     nextContent: string,
     nextImageFile: File | null,
     nextFileFile: File | null,
-    nextReplyToMessageId: number | null
+    nextReplyToMessageId: number | null,
+    nextMentionAll: boolean,
+    nextMentionedUserIds: string[]
   ): Promise<void> {
-    if (sending || (!nextContent.trim() && !nextImageFile && !nextFileFile)) {
+    const hasMentionRecipients = nextMentionAll || nextMentionedUserIds.length > 0;
+    if (sending || (!nextContent.trim() && !nextImageFile && !nextFileFile && !hasMentionRecipients)) {
       return;
     }
 
@@ -852,10 +1079,15 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
         content: nextContent,
         imageFile: nextImageFile,
         fileFile: nextFileFile,
-        replyToMessageId: nextReplyToMessageId
+        replyToMessageId: nextReplyToMessageId,
+        mentionAll: nextMentionAll,
+        mentionedUserIds: nextMentionedUserIds
       });
       setContent("");
       setReplyToMessageId((current) => current === nextReplyToMessageId ? null : current);
+      setMentionAll(false);
+      setMentionedUserIds([]);
+      setMentionPickerOpen(false);
       clearSelectedAttachment();
     } catch {
       // Keep input content for retry when send fails.
@@ -866,7 +1098,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    await sendMessage(content, imageFile, fileFile, replyToMessageId);
+    await sendMessage(content, imageFile, fileFile, replyToMessageId, mentionAll, mentionedUserIds);
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLInputElement>): Promise<void> {
@@ -888,7 +1120,7 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     }
 
     setAttachmentError(null);
-    await sendMessage(content, normalizedImage, null, replyToMessageId);
+    await sendMessage(content, normalizedImage, null, replyToMessageId, mentionAll, mentionedUserIds);
   }
 
   function handleDragEnter(event: DragEvent<HTMLElement>): void {
@@ -932,6 +1164,13 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
   }
 
   const hasPendingAttachment = Boolean(imageFile || fileFile);
+  const startupLastReadMessageId = startupLastReadMessageIdRef.current;
+  const oldestRenderedMessageId = renderedMessages[0]?.id ?? null;
+  const locatingFirstStartupUnread = startupUnreadCount > 0
+    && startupLastReadMessageId !== null
+    && oldestRenderedMessageId !== null
+    && oldestRenderedMessageId > startupLastReadMessageId
+    && hasOlderMessages;
 
   return (
     <section
@@ -943,18 +1182,47 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
     >
       <div className="module-head">
         <h2>群聊</h2>
-        {hiddenUnreadCount > 0 ? (
-          <button
-            type="button"
-            className="chat-unread-jump"
-            aria-label={`返回关闭期间第一条未读消息，共 ${hiddenUnreadCount} 条`}
-            title={`返回关闭期间第一条未读消息（${hiddenUnreadCount} 条）`}
-            onClick={scrollToFirstHiddenUnread}
-          >
-            <span aria-hidden="true">↑</span>
-            <small>{hiddenUnreadCount > 99 ? "99+" : hiddenUnreadCount}</small>
-          </button>
-        ) : null}
+        <div className="chat-head-actions">
+          {pendingMentionMessages.length > 0 ? (
+            <button
+              type="button"
+              className="chat-mention-alert"
+              aria-label={`有人@你，共 ${pendingMentionMessages.length} 条`}
+              title="跳到下一条@你的消息"
+              onClick={scrollToNextMention}
+            >
+              有人@你
+              {pendingMentionMessages.length > 1 ? <small>{pendingMentionMessages.length}</small> : null}
+            </button>
+          ) : null}
+          {startupUnreadCount > 0 ? (
+            <button
+              type="button"
+              className="chat-unread-jump"
+              aria-label={locatingFirstStartupUnread
+                ? `正在定位本次启动后的第一条新消息，已找到 ${startupUnreadCount} 条`
+                : `返回本次启动后的第一条新消息，共 ${startupUnreadCount} 条`}
+              title={locatingFirstStartupUnread
+                ? `正在定位第一条新消息（已找到 ${startupUnreadCount} 条）`
+                : `返回本次启动后的第一条新消息（${startupUnreadCount} 条）`}
+              onClick={scrollToFirstStartupUnread}
+            >
+              <span aria-hidden="true">↑</span>
+              <small>{startupUnreadCount > 99 ? "99+" : startupUnreadCount}</small>
+            </button>
+          ) : hiddenUnreadCount > 0 ? (
+            <button
+              type="button"
+              className="chat-unread-jump"
+              aria-label={`返回关闭期间第一条未读消息，共 ${hiddenUnreadCount} 条`}
+              title={`返回关闭期间第一条未读消息（${hiddenUnreadCount} 条）`}
+              onClick={scrollToFirstHiddenUnread}
+            >
+              <span aria-hidden="true">↓</span>
+              <small>{hiddenUnreadCount > 99 ? "99+" : hiddenUnreadCount}</small>
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="chat-list" ref={listRef} onScroll={updateBottomState}>
         <div className="chat-history-status" role="status" aria-live="polite">
@@ -974,6 +1242,10 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
           const isMine = message.user.id === currentUserId;
           const replyTo = message.replyTo;
           const isReplyTargetVisible = replyTo ? renderedMessageIds.has(replyTo.id) : false;
+          const messageMentionUsers = (message.mentionedUserIds ?? []).map((mentionedUserId) => ({
+            id: mentionedUserId,
+            nickname: presenceUsers.find((user) => user.id === mentionedUserId)?.nickname ?? "已注销成员"
+          }));
           return (
             <article
               className={`chat-item ${isMine ? "mine" : ""} ${replyToMessageId === message.id ? "reply-selected" : ""} ${highlightedMessageId === message.id ? "quoted-target" : ""}`}
@@ -1002,6 +1274,12 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
                     <strong>{replyTo.user.nickname}</strong>
                     <span>{getMessagePreview(replyTo)}</span>
                   </button>
+                ) : null}
+                {message.mentionAll || messageMentionUsers.length > 0 ? (
+                  <div className="chat-message-mentions" aria-label="消息提及">
+                    {message.mentionAll ? <span>@所有人</span> : null}
+                    {messageMentionUsers.map((user) => <span key={user.id}>@{user.nickname}</span>)}
+                  </div>
                 ) : null}
                 {message.image ? (
                   <button
@@ -1049,6 +1327,49 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
           </button>
         ) : null}
 
+        {mentionAll || mentionedUsers.length > 0 ? (
+          <div className="chat-mention-selection" aria-label="已选择的提及对象">
+            {mentionAll ? (
+              <button type="button" disabled={sending} onClick={() => setMentionAll(false)}>
+                @所有人 <span aria-hidden="true">×</span>
+              </button>
+            ) : null}
+            {mentionedUsers.map((user) => (
+              <button key={user.id} type="button" disabled={sending} onClick={() => toggleMentionUser(user.id)}>
+                @{user.nickname} <span aria-hidden="true">×</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {mentionPickerOpen ? (
+          <div className="chat-mention-picker" role="group" aria-label="选择要提及的成员">
+            <button
+              type="button"
+              className={mentionAll ? "selected" : ""}
+              aria-pressed={mentionAll}
+              onClick={toggleMentionAll}
+            >
+              <strong>@所有人</strong>
+            </button>
+            {mentionableUsers.map((user) => {
+              const selected = mentionedUserIds.includes(user.id);
+              return (
+                <button
+                  key={user.id}
+                  type="button"
+                  className={selected ? "selected" : ""}
+                  aria-pressed={selected}
+                  onClick={() => toggleMentionUser(user.id)}
+                >
+                  <strong>@{user.nickname}</strong>
+                  <small>{user.isOnline ? "在线" : "离线"}</small>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
         {replyToMessage ? (
           <div className="chat-reply-preview">
             <span className="chat-reply-preview-content">
@@ -1094,6 +1415,16 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
             }}
             maxLength={1000}
           />
+          <button
+            type="button"
+            className="chat-mention-button"
+            aria-label="选择要@的成员"
+            aria-expanded={mentionPickerOpen}
+            disabled={sending}
+            onClick={() => setMentionPickerOpen((open) => !open)}
+          >
+            @
+          </button>
           <input
             ref={fileInputRef}
             className="chat-attachment-input"
@@ -1108,7 +1439,10 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
           >
             附件
           </button>
-          <button type="submit" disabled={sending || (!content.trim() && !hasPendingAttachment)}>
+          <button
+            type="submit"
+            disabled={sending || (!content.trim() && !hasPendingAttachment && !mentionAll && mentionedUserIds.length === 0)}
+          >
             {sending ? "发送中" : "发送"}
           </button>
         </form>
