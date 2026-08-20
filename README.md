@@ -234,6 +234,14 @@ npm.cmd run electron:dist
 
 `electron:dist` 会在 `release/` 下生成 `XiaoELong Setup x.y.z.exe`、`.blockmap` 和 `latest.yml`。将这三个文件上传到服务器 `UPDATE_ROOT` 对应目录后，安装版客户端可在设置里检查、下载并重启安装更新。
 
+将 Windows 自动更新三件套打成便于上传服务器的版本化 ZIP，并生成 SHA-256 清单：
+
+```powershell
+npm.cmd run updates:deploy
+```
+
+该命令会生成 `deploy/XiaoELong-updates-2.2.0.zip` 与 `deploy/SHA256-2.2.0.txt`；校验清单还会包含同版本服务器部署包（若已生成）的哈希。
+
 在 macOS 或 GitHub Actions 的 macOS 运行器中生成 Intel + Apple Silicon 通用测试包：
 
 ```bash

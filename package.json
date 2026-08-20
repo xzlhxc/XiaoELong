@@ -27,6 +27,7 @@
     "server:deploy": "node scripts/clean.mjs --server-only && npm run build --workspace shared && npm run build --workspace server && node scripts/build-server-deploy.mjs",
     "electron:pack": "npm run build:cloud && electron-builder --dir",
     "electron:dist": "npm run build:cloud && electron-builder --win nsis --publish never",
+    "updates:deploy": "node scripts/build-update-deploy.mjs",
     "electron:dist:mac": "npm run build:cloud && electron-builder --mac dmg zip --universal --publish never && npm run mac:update-manifest"
   },
   "main": "electron/main.js",
