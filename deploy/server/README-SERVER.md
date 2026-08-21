@@ -637,14 +637,14 @@ try { & "$MysqlExe" -h 127.0.0.1 -P 3306 -u root -D XiaoELong -e $Sql } finally 
 执行 `db:init` 后，在服务器部署根目录运行固定版本题库导入：
 
 ```powershell
-Set-Location "C:\wwwroot\server"
-& "C:\BtSoft\nodejs\v22.23.1\node.exe" ".\server\dist\scripts\question-bank-import.js"
+Set-Location "C:\wwwroot\server\server"
+& "C:\BtSoft\nodejs\v22.23.1\node.exe" ".\dist\scripts\question-bank-import.js"
 ```
 
 导入完成后，分批复核答案并生成解析。默认处理 20 道，建议首次准备至少 365 道；命令会逐题调用 DeepSeek，耗时和费用随数量增加：
 
 ```powershell
-& "C:\BtSoft\nodejs\v22.23.1\node.exe" ".\server\dist\scripts\question-bank-explain.js" --limit=365
+& "C:\BtSoft\nodejs\v22.23.1\node.exe" ".\dist\scripts\question-bank-explain.js" --limit=365
 ```
 
 若要只处理某个来源，可增加 `--source=logiqa2`、`--source=cmmlu` 或 `--source=raven_style`。图形题自带确定性规则解析，无需执行 AI 解析命令。审核发现文本题答案不唯一、标准答案可疑或知识过时的题会自动停用。重复运行导入不会清除内容未变化题目的已有解析；数据源题目内容发生变化时，其旧解析会自动失效并等待重新审核。
